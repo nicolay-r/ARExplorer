@@ -23,19 +23,18 @@ Examples:
     Search and filter in massive database of documents.
     Opearations on graphs.
 
-UI:
+UI / Agent Client:
     - d3js Vis for any data. (requires support output schema from LLM).
+    => refurbished version of the this UI:
+        https://github.com/nicolay-r/ARE-d3js
+        Which could be forked to
+        https://github.com/nicolay-r/ARExplorer
 
 MCP: Tools #1, #2 are accessible via MCP, because we have GitHub projects for them.
 
 Github project of the developed OpinionAgent must include .agent registered SLILLS for effective development.
 
 This file could be formed in specs. Specs could be stored in 'docs/' project directory.
-
-The UI could be a refurbished version of the this UI:
-    https://github.com/nicolay-r/ARE-d3js
-    Which could be forked to
-    https://github.com/nicolay-r/ARExplorer
 
 Limitation: pronouns he /she is not covered. Could be covered with 2 via extra pass over results returned by tool#1.
 

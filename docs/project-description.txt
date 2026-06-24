@@ -1,43 +1,56 @@
-We consider the following tools:
+ARExplorer system description.
 
-#1. tool that represents the main contribution of the agent: bulk-ner.
-    bulk-ner provides a service of annotating the named entities to the massive volume of texts that solves the context limit problem of LM models.
+Considering two components: agent + UI. 
 
-    It provides the output in the most readable form that represents lists of the tokens and a notation of entities in it.
-    We can use this information as an output context, suitable for LLMs.
+AGENT:
+    For the agent we need declaration of TOOLS.
 
-#2 tool that determins connection between entities.
-    It's something that could be done with LLM.
-    Given a dataset of pairs, where how we can approach this is to apply the bulk-chain.
-    bulk-chain allows to use batching technique of querying LLM (llm-as-service) by implementing adapter to any provider.
-    Input: schema, is a custom chain or a single prompt in which parameter is the TYPE OF RELATION
-    We can by default register sentiment and analysis type of relations, which assumes that we output. [give link to task / papers / of related studies].
-    Classify relations among three different facets, which is positive, negative, neutral.
+    TOOLS:
+        #1. tool that represents the main contribution of the agent: bulk-ner.
+            bulk-ner provides a service of annotating the named entities to the massive volume of texts that solves the context limit problem of LM models.
+        
+            It provides the output in the most readable form that represents lists of the tokens and a notation of entities in it.
+            We can use this information as an output context, suitable for LLMs.
+        
+        #2 tool that determins connection between entities.
+            It's something that could be done with LLM.
+            Given a dataset of pairs, where how we can approach this is to apply the bulk-chain.
+            bulk-chain allows to use batching technique of querying LLM (llm-as-service) by implementing adapter to any provider.
+            Input: schema, is a custom chain or a single prompt in which parameter is the TYPE OF RELATION
+            We can by default register sentiment and analysis type of relations, which assumes that we output. [give link to task / papers / of related studies].
+            Classify relations among three different facets, which is positive, negative, neutral.
+        
+        #3 Graph operations.
+            Simple tool that performs Union, Intersection operations.
+            Since we did not expect here use of third-party resouces, this could be a single function.
+            Therefore, it does not require use for MCP.
+        
+        Examples:
+            Search and filter in massive database of documents.
+            Opearations on graphs.
+    
+    MCP: 
+        Tools #1, #2 are accessible via MCP, because we have GitHub projects for them.
+    
+    SKILLS:
+        Github project of the developed OpinionAgent must include .agent registered SLILLS for effective development.
 
-#3 Graph operations.
-    Simple tool that performs Union, Intersection operations.
-    Since we did not expect here use of third-party resouces, this could be a single function.
-    Therefore, it does not require use for MCP.
-
-Examples:
-    Search and filter in massive database of documents.
-    Opearations on graphs.
-
-UI / Agent Client:
+-------------------
+UI / AGENT CLIENT:
     - d3js Vis for any data. (requires support output schema from LLM).
     => refurbished version of the this UI:
         https://github.com/nicolay-r/ARE-d3js
         Which could be forked to
         https://github.com/nicolay-r/ARExplorer
+-------------------
 
-MCP: Tools #1, #2 are accessible via MCP, because we have GitHub projects for them.
+DOCS:
+    This file could be formed in specs. Specs could be stored in 'docs/' project directory.
 
-Github project of the developed OpinionAgent must include .agent registered SLILLS for effective development.
+LIMITATION: 
+    1. pronouns he /she is not covered. Could be covered with 2 via extra pass over results returned by tool#1.
+    2. UI: we use only CHAT as an interation with Agent, while simimar queries could be made as SHORTCUTS of interaction with graph elements.
 
-This file could be formed in specs. Specs could be stored in 'docs/' project directory.
-
-Limitation: pronouns he /she is not covered. Could be covered with 2 via extra pass over results returned by tool#1.
-
-Evaluation:
+EVALUATION:
     NER: refer to particular model
     SENTIMENT ANALYSIS: refer to link on my github with eval for LLM models and non-llm * (out-of-scope but still).

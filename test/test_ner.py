@@ -14,14 +14,9 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-# Point bulk-ner at the local spaCy provider BEFORE importing the tool, since
-# ner.py reads these into module-level constants at import time.
-os.environ.setdefault("BULK_NER_SRC_DIR", os.path.join(ROOT, "test", "providers"))
-os.environ.setdefault("BULK_NER_CLASS_FILEPATH", "spacy_383.py")
-os.environ.setdefault("BULK_NER_CLASS_NAME", "SpacyNER")
-os.environ.setdefault("BULK_NER_MODEL", "en_core_web_sm")
-
 from tools.ner import extract_named_entities  # noqa: E402
+
+PROVIDERS_DIR = os.path.join(ROOT, "test", "providers")
 
 TEXTS = [
     "It was in July, 1805, and the speaker was the well-known Anna Pávlovna.",
@@ -31,7 +26,14 @@ TEXTS = [
 
 def test_extract_named_entities():
     """Submit texts and return the annotated output."""
-    result = extract_named_entities(TEXTS)
+    # Use the local spaCy provider (test/providers/spacy_383.py).
+    result = extract_named_entities(
+        TEXTS,
+        src_dir=PROVIDERS_DIR,
+        class_filepath="spacy_383.py",
+        class_name="SpacyNER",
+        model="en_core_web_sm",
+    )
 
     assert result["status"] == "success", result
     assert len(result["documents"]) == len(TEXTS)

@@ -8,21 +8,12 @@ readable, LLM-friendly representation.
 See the `bulk-ner` skill for the underlying API.
 """
 
-import os
 from functools import lru_cache
 
-# Model configuration (overridable via environment). Defaults mirror the
-# bulk-ner skill example using a DeepPavlov OntoNotes BERT model.
-NER_SRC_DIR = os.environ.get("BULK_NER_SRC_DIR", "models")
-NER_CLASS_FILEPATH = os.environ.get("BULK_NER_CLASS_FILEPATH", "dp_130.py")
-NER_CLASS_NAME = os.environ.get("BULK_NER_CLASS_NAME", "DeepPavlovNER")
-NER_MODEL = os.environ.get("BULK_NER_MODEL", "ner_ontonotes_bert")
-NER_CHUNK_LIMIT = int(os.environ.get("BULK_NER_CHUNK_LIMIT", "128"))
 
-
-@lru_cache(maxsize=1)
-def _get_annotator():
-    """Lazily build and cache the NER annotator.
+@lru_cache(maxsize=None)
+def _get_annotator(src_dir, class_filepath, class_name, model, chunk_limit):
+    """Lazily build and cache the NER annotator for a given configuration.
 
     Imports happen here so the module can be imported without the heavy
     `bulk-ner` dependency (and its model) being installed.
@@ -31,15 +22,15 @@ def _get_annotator():
     from bulk_ner.src.service_dynamic import dynamic_init
 
     ner_model = dynamic_init(
-        src_dir=NER_SRC_DIR,
-        class_filepath=NER_CLASS_FILEPATH,
-        class_name=NER_CLASS_NAME,
-    )(model=NER_MODEL)
+        src_dir=src_dir,
+        class_filepath=class_filepath or "dp_130.py",
+        class_name=class_name or "DeepPavlovNER",
+    )(model=model or "ner_ontonotes_bert")
 
     return NERAnnotator(
         ner_model=ner_model,
         entity_func=lambda t: [t.Value, t.Type, t.ID],
-        chunk_limit=NER_CHUNK_LIMIT,
+        chunk_limit=chunk_limit,
     )
 
 
@@ -56,7 +47,15 @@ def _collect_entities(result: list) -> list:
     return entities
 
 
-def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
+def extract_named_entities(
+    texts: list[str],
+    batch_size: int = 10,
+    src_dir: str | None = None,
+    class_filepath: str | None = None,
+    class_name: str | None = None,
+    model: str | None = None,
+    chunk_limit: int = 512,
+) -> dict:
     """Extract named entities from a collection of texts.
 
     Annotates each text with named entities (people, dates, locations,
@@ -66,6 +65,11 @@ def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
     Args:
         texts: The texts to annotate.
         batch_size: How many texts to process per batch.
+        src_dir: Directory containing the NER provider script.
+        class_filepath: Provider script filename (relative to src_dir).
+        class_name: Provider class to instantiate from the script.
+        model: Model identifier passed to the provider.
+        chunk_limit: Maximum chunk size (in tokens) fed to the model.
 
     Returns:
         A dict with:
@@ -79,7 +83,9 @@ def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
         return {"status": "success", "documents": []}
 
     try:
-        annotator = _get_annotator()
+        annotator = _get_annotator(
+            src_dir, class_filepath, class_name, model, chunk_limit
+        )
     except Exception as exc:  # noqa: BLE001 - surface init/import failures to the LLM
         return {
             "status": "error",

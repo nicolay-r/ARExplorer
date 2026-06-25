@@ -9,18 +9,7 @@ Chain-of-Thought schema parameterized by the TYPE OF RELATION. See the
 `bulk-chain` skill for the underlying API.
 """
 
-import os
 from functools import lru_cache
-
-# LLM provider configuration (overridable via environment). `bulk-chain` loads a
-# third-party provider adapter script dynamically; see nlp-thirdgate for scripts.
-LLM_PROVIDER_FILEPATH = os.environ.get(
-    "BULK_CHAIN_PROVIDER", "replicate_104.py"
-)
-LLM_MODEL_NAME = os.environ.get(
-    "BULK_CHAIN_MODEL", "meta/meta-llama-3-70b-instruct"
-)
-LLM_API_TOKEN = os.environ.get("BULK_CHAIN_API_TOKEN", "")
 
 VALID_LABELS = {"positive", "negative", "neutral"}
 
@@ -52,15 +41,15 @@ def _sentiment_schema(relation_type: str) -> list[dict]:
     ]
 
 
-@lru_cache(maxsize=1)
-def _get_llm():
-    """Lazily build and cache the bulk-chain LLM adapter."""
+@lru_cache(maxsize=None)
+def _get_llm(provider_filepath, model_name, api_token):
+    """Lazily build and cache the bulk-chain LLM adapter for a configuration."""
     from bulk_chain.core.utils import dynamic_init
 
-    kwargs = {"model_name": LLM_MODEL_NAME}
-    if LLM_API_TOKEN:
-        kwargs["api_token"] = LLM_API_TOKEN
-    return dynamic_init(class_filepath=LLM_PROVIDER_FILEPATH)(**kwargs)
+    kwargs = {"model_name": model_name}
+    if api_token:
+        kwargs["api_token"] = api_token
+    return dynamic_init(class_filepath=provider_filepath)(**kwargs)
 
 
 def _normalize_label(raw: str) -> str:
@@ -76,6 +65,9 @@ def classify_relations(
     pairs: list[dict],
     relation_type: str = "sentiment",
     batch_size: int = 10,
+    provider_filepath: str | None = None,
+    model_name: str = "meta/meta-llama-3-70b-instruct",
+    api_token: str = "",
 ) -> dict:
     """Classify the attitude/relation between pairs of entities.
 
@@ -91,6 +83,9 @@ def classify_relations(
         relation_type: The type of relation to assess (default "sentiment").
             This is the parameter of the underlying schema.
         batch_size: How many pairs to query per LLM batch.
+        provider_filepath: Path to the bulk-chain provider adapter script.
+        model_name: Model identifier passed to the provider.
+        api_token: API token for the provider (empty to rely on provider default).
 
     Returns:
         A dict with:
@@ -114,7 +109,7 @@ def classify_relations(
         }
 
     try:
-        llm = _get_llm()
+        llm = _get_llm(provider_filepath, model_name, api_token)
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "error",

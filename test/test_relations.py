@@ -20,16 +20,9 @@ load_dotenv()
 ROOT = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-# Point bulk-chain at the local Replicate provider BEFORE importing the tool,
-# since relations.py reads these into module-level constants at import time.
-os.environ.setdefault(
-    "BULK_CHAIN_PROVIDER",
-    os.path.join(ROOT, "test", "providers", "replicate_104.py"),
-)
-os.environ.setdefault("BULK_CHAIN_MODEL", "meta/meta-llama-3-70b-instruct")
-os.environ.setdefault("BULK_CHAIN_API_TOKEN", os.getenv("REPLICATE_API_TOKEN"))
-
 from tools.relations import classify_relations  # noqa: E402
+
+PROVIDER_FILEPATH = os.path.join(ROOT, "test", "providers", "replicate_104.py")
 
 PAIRS = [
     {
@@ -47,7 +40,13 @@ PAIRS = [
 
 def test_classify_relations():
     """Submit entity pairs and return the classified relations."""
-    result = classify_relations(PAIRS)
+    # Use the local Replicate provider (test/providers/replicate_104.py).
+    result = classify_relations(
+        PAIRS,
+        provider_filepath=PROVIDER_FILEPATH,
+        model_name="meta/meta-llama-3-70b-instruct",
+        api_token=os.getenv("REPLICATE_API_TOKEN", ""),
+    )
 
     assert result["status"] == "success", result
     assert len(result["relations"]) == len(PAIRS)

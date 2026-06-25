@@ -1,0 +1,9 @@
+# ADK 2.0 — agent framework
+google-adk
+# Tool #1 — Named Entity Recognition over massive text collections
+bulk_ner==0.25.2
+# Tool #2 — Relation / attitude classification (LLM-as-a-service batching)
+bulk-chain==1.2.1
+# Hosting / server (see docs/project-description.txt)
+fastapi
+uvicorn

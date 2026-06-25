@@ -6,15 +6,44 @@ ADK 2.0 root agent exposing three tools (wrapped over their Python APIs):
   #3 graph_operation         — union / intersection over attitude graphs
 """
 
+import os
+
 from google.adk.agents import Agent
 from google.adk.models import Gemini
 from google.genai import types
 
-from tools import (
-    extract_named_entities,
-    classify_relations,
+from src.tools import (
+    extract_named_entities as _extract_named_entities,
+    classify_relations as _classify_relations,
     graph_operation,
 )
+
+
+def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
+    return _extract_named_entities(
+        texts,
+        batch_size=batch_size,
+        src_dir=os.environ.get("NER_SRC_DIR"),
+        class_filepath=os.environ.get("NER_CLASS_FILEPATH"),
+        class_name=os.environ.get("NER_CLASS_NAME"),
+        model=os.environ.get("NER_MODEL"),
+    )
+
+
+def classify_relations(
+    pairs: list[dict],
+    relation_type: str = "sentiment",
+    batch_size: int = 10,
+) -> dict:
+    return _classify_relations(
+        pairs,
+        relation_type=relation_type,
+        batch_size=batch_size,
+        provider_filepath=os.environ.get("RELATION_PROVIDER_FILEPATH"),
+        model_name=os.environ.get("RELATION_MODEL"),
+        api_token=os.environ.get("REPLICATE_API_TOKEN", ""),
+    )
+
 
 INSTRUCTION = """\
 You are ARExplorer, an assistant that extracts and explores Attitudes and

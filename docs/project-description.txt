@@ -30,8 +30,10 @@ AGENT:
             Opearations on graphs.
     
     MCP: 
-        Tools #1, #2 are accessible via MCP, because we have GitHub projects for them.
-    
+        The application scope of tools #1-#3 is currently limited to this agent.
+	Thefore, we use simple wrapper for tools over exposed Python API.
+	The MCP could be done for the current agent.
+
     SKILLS:
         Github project of the developed OpinionAgent must include .agent registered SLILLS for effective development.
 

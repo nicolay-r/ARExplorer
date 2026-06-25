@@ -1,18 +1,22 @@
 ARExplorer system description.
 
-Considering two components: agent + UI. 
+Considering two components: Agent + UI. 
 
 AGENT:
+
+    ADK 2.0
     For the agent we need declaration of TOOLS.
 
     TOOLS:
-        #1. tool that represents the main contribution of the agent: bulk-ner.
+        #1 Tool that represents the main contribution of the agent: 
+            bulk-ner: https://github.com/nicolay-r/bulk-ner 
             bulk-ner provides a service of annotating the named entities to the massive volume of texts that solves the context limit problem of LM models.
         
             It provides the output in the most readable form that represents lists of the tokens and a notation of entities in it.
             We can use this information as an output context, suitable for LLMs.
         
-        #2 tool that determins connection between entities.
+        #2 tool that determine connection between entities.
+            bulk-chain: https://github.com/nicolay-r/bulk-chain
             It's something that could be done with LLM.
             Given a dataset of pairs, where how we can approach this is to apply the bulk-chain.
             bulk-chain allows to use batching technique of querying LLM (llm-as-service) by implementing adapter to any provider.
@@ -31,11 +35,14 @@ AGENT:
     
     MCP: 
         The application scope of tools #1-#3 is currently limited to this agent.
-	Thefore, we use simple wrapper for tools over exposed Python API.
-	The MCP could be done for the current agent.
+        Thefore, we use simple wrapper for tools over exposed Python API.
+        The MCP could be done for the current agent.
 
     SKILLS:
         Github project of the developed OpinionAgent must include .agent registered SLILLS for effective development.
+
+HOSTING / Server:
+    We can use Fast-API.
 
 -------------------
 UI / AGENT CLIENT:
@@ -44,6 +51,7 @@ UI / AGENT CLIENT:
         https://github.com/nicolay-r/ARE-d3js
         Which could be forked to
         https://github.com/nicolay-r/ARExplorer
+    - Access the agent via REST-API
 -------------------
 
 DOCS:

@@ -1,0 +1,4 @@
+.venv/
+.agents/
+__pycache__/
+skills-lock.json

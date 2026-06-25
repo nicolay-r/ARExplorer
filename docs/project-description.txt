@@ -2,7 +2,7 @@ ARExplorer system description.
 
 Considering two components: Agent + UI. 
 
-AGENT:
+AGENT: Agent for extracted Attitudes and Relations from documens
 
     ADK 2.0
     For the agent we need declaration of TOOLS.

@@ -1,0 +1,146 @@
+"""Tool #2 — Relation / attitude classification between entities (bulk-chain).
+
+Given pairs of entities in textual context, classify the attitude (relation)
+that the source entity expresses towards the target entity. By default this
+registers a *sentiment* relation with three facets: positive, negative, neutral.
+
+Uses the `bulk-chain` batching framework (LLM-as-a-service) with a
+Chain-of-Thought schema parameterized by the TYPE OF RELATION. See the
+`bulk-chain` skill for the underlying API.
+"""
+
+import os
+from functools import lru_cache
+
+# LLM provider configuration (overridable via environment). `bulk-chain` loads a
+# third-party provider adapter script dynamically; see nlp-thirdgate for scripts.
+LLM_PROVIDER_FILEPATH = os.environ.get(
+    "BULK_CHAIN_PROVIDER", "replicate_104.py"
+)
+LLM_MODEL_NAME = os.environ.get(
+    "BULK_CHAIN_MODEL", "meta/meta-llama-3-70b-instruct"
+)
+LLM_API_TOKEN = os.environ.get("BULK_CHAIN_API_TOKEN", "")
+
+VALID_LABELS = {"positive", "negative", "neutral"}
+
+
+def _sentiment_schema(relation_type: str) -> list[dict]:
+    """Build a Chain-of-Thought schema for a given relation type.
+
+    The relation type is the parameter of the schema (e.g. "sentiment"),
+    matching the design where the schema's parameter is the TYPE OF RELATION.
+    """
+    return [
+        {
+            "prompt": (
+                "Context: {text}\n"
+                f"Analyse the {relation_type} attitude expressed by the source "
+                "entity '{source}' towards the target entity '{target}'. "
+                "Reason briefly step by step."
+            ),
+            "out": "reasoning",
+        },
+        {
+            "prompt": (
+                "Reasoning: {reasoning}\n"
+                "Classify the attitude strictly as exactly one of: "
+                "positive, negative, neutral. Respond with a single lowercase word."
+            ),
+            "out": "label",
+        },
+    ]
+
+
+@lru_cache(maxsize=1)
+def _get_llm():
+    """Lazily build and cache the bulk-chain LLM adapter."""
+    from bulk_chain.core.utils import dynamic_init
+
+    kwargs = {"model_name": LLM_MODEL_NAME}
+    if LLM_API_TOKEN:
+        kwargs["api_token"] = LLM_API_TOKEN
+    return dynamic_init(class_filepath=LLM_PROVIDER_FILEPATH)(**kwargs)
+
+
+def _normalize_label(raw: str) -> str:
+    """Map a raw model answer to one of the three valid facets."""
+    text = (raw or "").strip().lower()
+    for label in VALID_LABELS:
+        if label in text:
+            return label
+    return "neutral"
+
+
+def classify_relations(
+    pairs: list[dict],
+    relation_type: str = "sentiment",
+    batch_size: int = 10,
+) -> dict:
+    """Classify the attitude/relation between pairs of entities.
+
+    For every pair, determine the attitude the source entity holds towards the
+    target entity within the given text, classified into one of three facets:
+    positive, negative, or neutral.
+
+    Args:
+        pairs: Each item must contain:
+            - text: the context sentence/document mentioning both entities.
+            - source: the source entity (holder of the attitude).
+            - target: the target entity (object of the attitude).
+        relation_type: The type of relation to assess (default "sentiment").
+            This is the parameter of the underlying schema.
+        batch_size: How many pairs to query per LLM batch.
+
+    Returns:
+        A dict with:
+        - status: "success" or "error".
+        - relations: list of {source, target, label, reasoning} where label is
+          one of positive/negative/neutral.
+        - error: present only when status is "error".
+    """
+    if not pairs:
+        return {"status": "success", "relations": []}
+
+    missing = [
+        i
+        for i, p in enumerate(pairs)
+        if not all(k in p for k in ("text", "source", "target"))
+    ]
+    if missing:
+        return {
+            "status": "error",
+            "error": f"Pairs at indices {missing} must each have 'text', 'source', 'target'.",
+        }
+
+    try:
+        llm = _get_llm()
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "error",
+            "error": f"Failed to initialize bulk-chain LLM provider: {exc}",
+        }
+
+    from bulk_chain.api import iter_content
+
+    content_it = iter_content(
+        schema=_sentiment_schema(relation_type),
+        llm=llm,
+        stream=False,
+        async_mode=True,
+        batch_size=batch_size,
+        input_dicts_it=list(pairs),
+    )
+
+    relations = []
+    for batch in content_it:
+        for entry in batch:
+            relations.append(
+                {
+                    "source": entry.get("source"),
+                    "target": entry.get("target"),
+                    "label": _normalize_label(entry.get("label", "")),
+                    "reasoning": entry.get("reasoning", ""),
+                }
+            )
+    return {"status": "success", "relations": relations}

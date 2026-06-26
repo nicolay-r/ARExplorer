@@ -47,11 +47,15 @@ HOSTING / Server:
 -------------------
 UI / AGENT CLIENT:
     - d3js Vis for any data. (requires support output schema from LLM).
+        - radial
+        - force
     => refurbished version of the this UI:
         https://github.com/nicolay-r/ARE-d3js
-        Which could be forked to
-        https://github.com/nicolay-r/ARExplorer
-    - Access the agent via REST-API
+            - We exporting corresponding UI into skills into this project for re-using the visualization content.
+            - We generalize the concept of using sentiment relations to rel (relation of any type)
+    - Access the agent via REST-API to access HOSTING / Server (driven by Fast-API)
+    - Interaction must be done via STRUCTURED OUTPUT from agent, based on formed schema.
+        - schema must include text dcomments that goes into chat + other UI related parameters (optional) that reflect d3js Vis abilities.
 -------------------
 
 DOCS:

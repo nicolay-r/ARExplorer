@@ -1,3 +1,4 @@
 NOTES:
     1. At first we turn tools and usage of their API into SKILLS (ease process of integrating them into tolls for coding agent)
     2. Added d3js-graph-visualization SKILL from the ARE-d3js template: covers radial + force graph layouts (d3 v4), with standalone runnable snippets placed as resource examples (resources/force-graph.html, resources/radial-graph.html) plus the full template.html for reference.
+        * Generalized the edge 'sent' (sentiment) field in the d3js-graph-visualization snippets to a generic 'rel' relation label with a configurable RELATION_COLORS map (sentiment is now just one example config); template.html kept as the verbatim sentiment-specific source.

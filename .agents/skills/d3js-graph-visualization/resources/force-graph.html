@@ -8,7 +8,9 @@
 
   Data shape:
     nodes: [{ id: <string>, c: <number frequency> }]
-    links: [{ source: <node id>, target: <node id>, c: <weight>, sent: "pos"|"neg"|"neu" }]
+    links: [{ source: <node id>, target: <node id>, c: <weight>, rel: <relation label> }]
+  `rel` is an arbitrary relation label; colors come from RELATION_COLORS below
+  (sentiment pos/neg/neu is just one example configuration).
 -->
 <style>
     .nodes circle { stroke: #fff; stroke-width: 1.5px; }
@@ -24,8 +26,11 @@
     const width = window.innerWidth * 0.9;
     const height = window.innerHeight * 0.85;
 
-    // Edge sentiment -> color
-    const colorMap = { pos: "blue", neg: "red", neu: "grey" };
+    // Relation label -> color. Add/replace entries for your own relation set;
+    // sentiment (pos/neg/neu) is just one example configuration.
+    const RELATION_COLORS = { pos: "blue", neg: "red", neu: "grey" };
+    const DEFAULT_COLOR = "black";
+    const relColor = rel => RELATION_COLORS[rel] || DEFAULT_COLOR;
 
     // ---- Sample data (replace with d3.json(...) in a real app) ----
     const graph = {
@@ -37,11 +42,11 @@
             { id: "Napoleon", c: 400 }
         ],
         links: [
-            { source: "Anna",    target: "Pierre",  c: 0.5, sent: "pos" },
-            { source: "Pierre",  target: "Natasha", c: 0.4, sent: "pos" },
-            { source: "Andrei",  target: "Natasha", c: 0.3, sent: "neg" },
-            { source: "Napoleon", target: "Andrei", c: 0.6, sent: "neg" },
-            { source: "Anna",    target: "Andrei",  c: 0.2, sent: "neu" }
+            { source: "Anna",    target: "Pierre",  c: 0.5, rel: "pos" },
+            { source: "Pierre",  target: "Natasha", c: 0.4, rel: "pos" },
+            { source: "Andrei",  target: "Natasha", c: 0.3, rel: "neg" },
+            { source: "Napoleon", target: "Andrei", c: 0.6, rel: "neg" },
+            { source: "Anna",    target: "Andrei",  c: 0.2, rel: "neu" }
         ]
     };
     const maxCount = d3.max(graph.nodes, d => d.c);
@@ -72,7 +77,7 @@
             .attr("d", "M0,-5L10,0L0,5")
             .attr("fill", "black");
 
-        // Links: width by weight, color by sentiment.
+        // Links: width by weight, color by relation label.
         const link = svg.append("g")
             .attr("class", "links")
             .selectAll("line")
@@ -80,7 +85,7 @@
             .enter().append("line")
             .attr("stroke-width", d => d.c * 30)
             .attr("opacity", 0.5)
-            .style("stroke", d => colorMap[d.sent] || "pink");
+            .style("stroke", d => relColor(d.rel));
 
         // Nodes: a <g> holding a circle + label, draggable.
         const node = svg.selectAll(".node")

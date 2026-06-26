@@ -4,8 +4,9 @@ description: >-
   Build interactive graph visualizations in HTML with d3.js (v4), covering the
   radial edge-bundling layout and the force-directed layout used by the
   ARE-d3js / ARExplorer UI. Use when the user wants to render a radial graph or
-  force graph, visualize nodes/links with sentiment-colored edges, embed a d3
-  graph in an HTML page, or adapt the ARE-d3js template.
+  force graph, visualize nodes/links colored by an arbitrary relation type
+  (sentiment being one example), embed a d3 graph in an HTML page, or adapt the
+  ARE-d3js template.
 ---
 
 # d3.js Graph Visualization
@@ -23,8 +24,22 @@ Load d3 v4 once in the page:
 <svg></svg>
 ```
 
-Edges are colored by a `sent` (sentiment) field: `pos` → blue, `neg` → red,
-`neu` → grey.
+## Relation types (generic edge labels)
+
+Each edge carries a `rel` field holding an arbitrary **relation label**. Colors
+come from a configurable map rather than being hardcoded — add or replace
+entries for whatever relation set you use:
+
+```js
+// Map relation labels -> colors. Sentiment is just one example configuration.
+const RELATION_COLORS = { pos: "blue", neg: "red", neu: "grey" };
+const DEFAULT_COLOR = "black";
+const relColor = rel => RELATION_COLORS[rel] || DEFAULT_COLOR;
+```
+
+To model other relations, swap the map, e.g.
+`{ support: "green", oppose: "red", mentions: "grey" }`. The layouts don't
+assume any fixed set of labels.
 
 ## Choosing a layout
 
@@ -40,7 +55,7 @@ Data shape — flat `nodes` + `links`, links reference node `id`s:
 ```json
 {
   "nodes": [{ "id": "Anna", "c": 1200 }, { "id": "Pierre", "c": 800 }],
-  "links": [{ "source": "Anna", "target": "Pierre", "c": 0.4, "sent": "pos" }]
+  "links": [{ "source": "Anna", "target": "Pierre", "c": 0.4, "rel": "pos" }]
 }
 ```
 
@@ -66,14 +81,14 @@ node's `imports`:
 
 ```json
 [
-  { "name": "root.Anna",  "w": 0.5, "imports": [{ "name": "root.Pierre", "w": 0.4, "sent": "pos" }] },
+  { "name": "root.Anna",  "w": 0.5, "imports": [{ "name": "root.Pierre", "w": 0.4, "rel": "pos" }] },
   { "name": "root.Pierre", "w": 0.3, "imports": [] }
 ]
 ```
 
 - The dotted `name` builds the hierarchy (`packageHierarchy`); use a common
   prefix (e.g. `root.`) so all leaves share one parent.
-- `imports[].w` drives edge `stroke-width`; `imports[].sent` drives color.
+- `imports[].w` drives edge `stroke-width`; `imports[].rel` drives color.
 
 Core pattern: `d3.cluster()` for layout + `d3.radialLine()` with
 `d3.curveBundle` for bundled edges:
@@ -91,12 +106,16 @@ See the full runnable example in [resources/radial-graph.html](resources/radial-
 ## Common conventions (both layouts)
 
 - **Clear before redraw**: `d3.select("svg").remove()` then append a fresh `svg`.
-- **Sentiment colors**: `{ pos: "blue", neg: "red", neu: "grey" }` (use
-  `class="blue-text"/"red-text"/"grey-text"` for matching legend labels).
+- **Relation colors**: drive edge color from `RELATION_COLORS[rel]` with a
+  `DEFAULT_COLOR` fallback; build a matching legend from the same map.
 - **Directional arrows**: define a reusable `marker` in `<defs>` and attach it
   via `marker-end: url(#arrow)` when highlighting a selected node's edges.
-- **Edge filtering**: drop edges whose `sent` checkbox is unchecked by setting
+- **Edge filtering**: hide edges of an unchecked relation label by setting
   their `opacity` to `0` rather than removing them.
+
+> The original `resources/template.html` uses the field name `sent` (sentiment)
+> with a fixed `pos`/`neg`/`neu` color map; that is the sentiment-specific
+> instance of the generic `rel` + `RELATION_COLORS` mechanism above.
 
 ## Resources
 

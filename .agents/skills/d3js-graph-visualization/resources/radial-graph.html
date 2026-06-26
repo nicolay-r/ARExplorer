@@ -7,8 +7,10 @@
   Open directly in a browser - sample data is inlined, no server needed.
 
   Data shape (flat list, hierarchy built from the dotted `name`):
-    [{ name: "root.X", w: <weight>, imports: [{ name: "root.Y", w: <weight>, sent: "pos"|"neg"|"neu" }] }]
+    [{ name: "root.X", w: <weight>, imports: [{ name: "root.Y", w: <weight>, rel: <relation label> }] }]
   Use a shared prefix (here "root.") so every leaf hangs off one parent node.
+  `rel` is an arbitrary relation label; colors come from RELATION_COLORS below
+  (sentiment pos/neg/neu is just one example configuration).
 -->
 <style>
     .node { font: 10px sans-serif; }
@@ -23,17 +25,20 @@
 <script>
     const width = Math.min(window.innerWidth, window.innerHeight) * 0.9;
 
-    // Edge sentiment -> color
-    const colorMap = { pos: "blue", neg: "red", neu: "grey" };
+    // Relation label -> color. Add/replace entries for your own relation set;
+    // sentiment (pos/neg/neu) is just one example configuration.
+    const RELATION_COLORS = { pos: "blue", neg: "red", neu: "grey" };
+    const DEFAULT_COLOR = "black";
+    const relColor = rel => RELATION_COLORS[rel] || DEFAULT_COLOR;
 
     // ---- Sample data (replace with d3.json(...) in a real app) ----
     const classes = [
-        { name: "root.Anna",    w: 0.5, imports: [{ name: "root.Pierre", w: 0.5, sent: "pos" },
-                                                   { name: "root.Andrei", w: 0.2, sent: "neu" }] },
-        { name: "root.Pierre",  w: 0.4, imports: [{ name: "root.Natasha", w: 0.4, sent: "pos" }] },
+        { name: "root.Anna",    w: 0.5, imports: [{ name: "root.Pierre", w: 0.5, rel: "pos" },
+                                                   { name: "root.Andrei", w: 0.2, rel: "neu" }] },
+        { name: "root.Pierre",  w: 0.4, imports: [{ name: "root.Natasha", w: 0.4, rel: "pos" }] },
         { name: "root.Natasha", w: 0.3, imports: [] },
-        { name: "root.Andrei",  w: 0.3, imports: [{ name: "root.Natasha", w: 0.3, sent: "neg" }] },
-        { name: "root.Napoleon", w: 0.2, imports: [{ name: "root.Andrei", w: 0.6, sent: "neg" }] }
+        { name: "root.Andrei",  w: 0.3, imports: [{ name: "root.Natasha", w: 0.3, rel: "neg" }] },
+        { name: "root.Napoleon", w: 0.2, imports: [{ name: "root.Andrei", w: 0.6, rel: "neg" }] }
     ];
 
     function draw_radial(classes) {
@@ -77,7 +82,7 @@
             .attr("d", line)
             .attr("stroke-width", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; })
             .attr("opacity", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; })
-            .style("stroke", d => { const e = edgeOf(d); return e ? (colorMap[e.sent] || "black") : "black"; })
+            .style("stroke", d => { const e = edgeOf(d); return e ? relColor(e.rel) : DEFAULT_COLOR; })
             .style("fill", "none");
 
         node = node

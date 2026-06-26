@@ -45,17 +45,19 @@ HOSTING / Server:
     We can use Fast-API.
 
 -------------------
-UI / AGENT CLIENT:
-    - d3js Vis for any data. (requires support output schema from LLM).
-        - radial
-        - force
-    => refurbished version of the this UI:
-        https://github.com/nicolay-r/ARE-d3js
-            - We exporting corresponding UI into skills into this project for re-using the visualization content.
-            - We generalize the concept of using sentiment relations to rel (relation of any type)
-    - Access the agent via REST-API to access HOSTING / Server (driven by Fast-API)
-    - Interaction must be done via STRUCTURED OUTPUT from agent, based on formed schema.
-        - schema must include text dcomments that goes into chat + other UI related parameters (optional) that reflect d3js Vis abilities.
+UI:
+    ELEMENTS:
+        - d3js Vis for any data. (requires support output schema from LLM).
+            - radial
+            - force
+    INTERACTION WITH AGENT:
+        - Access the agent via REST-API to access HOSTING / Server (driven by Fast-API)
+        - Interaction must be done via STRUCTURED OUTPUT from agent, based on formed schema.
+            - schema must include text dcomments that goes into chat + other UI related parameters (optional) that reflect d3js Vis abilities.
+    LAYOUT:
+        two panels: left and main.
+        main is the d3js vis panel
+        left panel is for chat with agent. Since output is structured, then textual output goes in chat and the one that refers to grap to d3js-Vis.
 -------------------
 
 DOCS:

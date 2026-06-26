@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<meta charset="utf-8">
+<!--
+  Standalone d3.js v4 RADIAL graph with hierarchical edge bundling.
+  Extracted and simplified from the ARE-d3js / ARExplorer template (draw_radial).
+  Open directly in a browser - sample data is inlined, no server needed.
+
+  Data shape (flat list, hierarchy built from the dotted `name`):
+    [{ name: "root.X", w: <weight>, imports: [{ name: "root.Y", w: <weight>, sent: "pos"|"neg"|"neu" }] }]
+  Use a shared prefix (here "root.") so every leaf hangs off one parent node.
+-->
+<style>
+    .node { font: 10px sans-serif; }
+    .link { fill: none; }
+    #svg_container { text-align: center; }
+</style>
+<body>
+
+<div id="svg_container"></div>
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script>
+    const width = Math.min(window.innerWidth, window.innerHeight) * 0.9;
+
+    // Edge sentiment -> color
+    const colorMap = { pos: "blue", neg: "red", neu: "grey" };
+
+    // ---- Sample data (replace with d3.json(...) in a real app) ----
+    const classes = [
+        { name: "root.Anna",    w: 0.5, imports: [{ name: "root.Pierre", w: 0.5, sent: "pos" },
+                                                   { name: "root.Andrei", w: 0.2, sent: "neu" }] },
+        { name: "root.Pierre",  w: 0.4, imports: [{ name: "root.Natasha", w: 0.4, sent: "pos" }] },
+        { name: "root.Natasha", w: 0.3, imports: [] },
+        { name: "root.Andrei",  w: 0.3, imports: [{ name: "root.Natasha", w: 0.3, sent: "neg" }] },
+        { name: "root.Napoleon", w: 0.2, imports: [{ name: "root.Andrei", w: 0.6, sent: "neg" }] }
+    ];
+
+    function draw_radial(classes) {
+        d3.select("svg").remove();
+
+        const diameter = width,
+              radius = diameter / 2,
+              innerRadius = radius * 0.8;
+
+        const cluster = d3.cluster().size([360, innerRadius]);
+
+        // Bundled radial edges: polar coordinates + curveBundle.
+        const line = d3.radialLine()
+            .curve(d3.curveBundle.beta(0.85))
+            .radius(d => d.y)
+            .angle(d => d.x / 180 * Math.PI);
+
+        let svg = d3.select("#svg_container").append("svg")
+            .attr("id", "svg")
+            .attr("width", diameter)
+            .attr("height", diameter);
+        svg = svg.append("g")
+            .attr("transform", `translate(${radius},${radius})`);
+
+        let link = svg.append("g").selectAll(".link"),
+            node = svg.append("g").selectAll(".node");
+
+        function edgeOf(d) {
+            const target = d.target.data.name;
+            return d.source.data.imports.find(s => s.name === target);
+        }
+
+        const root = packageHierarchy(classes).sum(d => d.w);
+        cluster(root);
+
+        link = link
+            .data(packageImports(root.leaves()))
+            .enter().append("path")
+            .each(d => { d.source = d[0]; d.target = d[d.length - 1]; })
+            .attr("class", "link")
+            .attr("d", line)
+            .attr("stroke-width", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; })
+            .attr("opacity", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; })
+            .style("stroke", d => { const e = edgeOf(d); return e ? (colorMap[e.sent] || "black") : "black"; })
+            .style("fill", "none");
+
+        node = node
+            .data(root.leaves())
+            .enter().append("text")
+            .attr("class", "node")
+            .attr("dy", "0.31em")
+            .attr("transform", d => "rotate(" + (d.x - 90) + ")translate(" + (d.y + 8) + ",0)" + (d.x < 180 ? "" : "rotate(180)"))
+            .attr("text-anchor", d => d.x < 180 ? "start" : "end")
+            .text(d => d.data.key)
+            // Hover a node -> emphasize only the edges touching its name.
+            .on("mouseover", d_parent => {
+                const name = d_parent.data.name;
+                svg.selectAll(".link").transition().duration(300).attr("opacity", 0.05);
+                link.filter(d => d.source.data.name === name || d.target.data.name === name)
+                    .transition().duration(300)
+                    .attr("opacity", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; });
+            })
+            .on("mouseout", () => {
+                link.transition().duration(300)
+                    .attr("opacity", d => { const e = edgeOf(d); return e ? e.w * 10 : 1; });
+            });
+    }
+
+    // Build the package hierarchy from dotted class names.
+    function packageHierarchy(classes) {
+        const map = {};
+        function find(name, data) {
+            let node = map[name], i;
+            if (!node) {
+                node = map[name] = data || { name: name, children: [] };
+                if (name.length) {
+                    node.parent = find(name.substring(0, i = name.lastIndexOf(".")));
+                    node.parent.children.push(node);
+                    node.key = name.substring(i + 1);
+                }
+            }
+            return node;
+        }
+        classes.forEach(d => find(d.name, d));
+        return d3.hierarchy(map[""]);
+    }
+
+    // Construct a source->target link for every import.
+    function packageImports(nodes) {
+        const map = {}, imports = [];
+        nodes.forEach(d => { map[d.data.name] = d; });
+        nodes.forEach(d => {
+            if (d.data.imports) d.data.imports.forEach(i => {
+                if (map[i.name]) imports.push(map[d.data.name].path(map[i.name]));
+            });
+        });
+        return imports;
+    }
+
+    draw_radial(classes);
+</script>
+</body>
+</html>

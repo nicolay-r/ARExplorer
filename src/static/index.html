@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ARExplorer</title>
+    <style>
+        * { box-sizing: border-box; }
+        html, body { margin: 0; height: 100%; font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+        body { display: flex; height: 100vh; color: #1f2933; }
+
+        /* Left panel: chat */
+        #chat_panel {
+            width: 360px; min-width: 300px; display: flex; flex-direction: column;
+            border-right: 1px solid #e1e5ea; background: #f7f9fb;
+        }
+        #chat_header { padding: 14px 16px; font-weight: 600; border-bottom: 1px solid #e1e5ea; }
+        #chat_header small { display: block; font-weight: 400; color: #7b8794; font-size: 11px; }
+        #messages { flex: 1; overflow-y: auto; padding: 12px; }
+        .msg { margin-bottom: 10px; padding: 8px 12px; border-radius: 12px; max-width: 90%; white-space: pre-wrap; line-height: 1.4; font-size: 14px; }
+        .msg.user { background: #2850b4; color: #fff; margin-left: auto; border-bottom-right-radius: 3px; }
+        .msg.agent { background: #fff; border: 1px solid #e1e5ea; border-bottom-left-radius: 3px; }
+        .msg.error { background: #fde8e6; color: #b42323; border: 1px solid #f4c7c3; }
+        .msg.thinking { color: #7b8794; font-style: italic; }
+        #composer { display: flex; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
+        #composer textarea { flex: 1; resize: none; height: 46px; padding: 8px; border: 1px solid #cbd2d9; border-radius: 8px; font: inherit; }
+        #composer button { padding: 0 16px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
+        #composer button:disabled { background: #9aa5b1; cursor: not-allowed; }
+
+        /* Main panel: visualization */
+        #vis_panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        #vis_toolbar { padding: 10px 16px; border-bottom: 1px solid #e1e5ea; display: flex; align-items: center; gap: 8px; }
+        #vis_toolbar .layout-btn { padding: 6px 14px; border: 1px solid #cbd2d9; background: #fff; border-radius: 8px; cursor: pointer; font-weight: 600; color: #52606d; }
+        #vis_toolbar .layout-btn.active { background: #2850b4; color: #fff; border-color: #2850b4; }
+        .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: #52606d; }
+        .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+        .legend .positive::before { background: #2850b4; }
+        .legend .negative::before { background: #b42323; }
+        .legend .neutral::before { background: #979797; }
+        #svg_container { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        #svg_container .empty { color: #9aa5b1; font-size: 14px; }
+
+        .links line { stroke-linecap: round; }
+        .node text, .radial-node { font: 11px sans-serif; }
+        .node text { text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
+        .link { fill: none; }
+    </style>
+</head>
+<body>
+
+<div id="chat_panel">
+    <div id="chat_header">
+        ARExplorer
+        <small>Ask about attitudes &amp; relations between entities in your documents.</small>
+    </div>
+    <div id="messages"></div>
+    <div id="composer">
+        <textarea id="prompt" placeholder="e.g. Extract entities and their attitudes from: ..."></textarea>
+        <button id="send">Send</button>
+    </div>
+</div>
+
+<div id="vis_panel">
+    <div id="vis_toolbar">
+        <button class="layout-btn active" id="force_btn" onclick="setLayout('force')">Force</button>
+        <button class="layout-btn" id="radial_btn" onclick="setLayout('radial')">Radial</button>
+        <div class="legend">
+            <span class="positive">positive</span>
+            <span class="negative">negative</span>
+            <span class="neutral">neutral</span>
+        </div>
+    </div>
+    <div id="svg_container"><div class="empty">No graph yet — ask the agent to extract relations.</div></div>
+</div>
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<script>
+    //////////////////////////////////////////////////////////////////////////
+    // Relation -> color (generic; sentiment is the default configuration)
+    //////////////////////////////////////////////////////////////////////////
+    const RELATION_COLORS = {
+        positive: "#2850b4", pos: "#2850b4",
+        negative: "#b42323", neg: "#b42323",
+        neutral: "#979797",  neu: "#979797"
+    };
+    const DEFAULT_COLOR = "#52606d";
+    const relColor = rel => RELATION_COLORS[(rel || "").toLowerCase()] || DEFAULT_COLOR;
+
+    let currentLayout = "force";
+    let currentGraph = { nodes: [], edges: [] };
+    let sessionId = null;
+
+    //////////////////////////////////////////////////////////////////////////
+    // Chat
+    //////////////////////////////////////////////////////////////////////////
+    const messagesEl = document.getElementById("messages");
+    const promptEl = document.getElementById("prompt");
+    const sendBtn = document.getElementById("send");
+
+    function addMessage(text, kind) {
+        const div = document.createElement("div");
+        div.className = "msg " + kind;
+        div.textContent = text;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        return div;
+    }
+
+    async function send() {
+        const text = promptEl.value.trim();
+        if (!text) return;
+        promptEl.value = "";
+        sendBtn.disabled = true;
+        addMessage(text, "user");
+        const thinking = addMessage("thinking…", "agent thinking");
+
+        try {
+            const res = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: text, session_id: sessionId })
+            });
+            if (!res.ok) throw new Error("HTTP " + res.status);
+            const data = await res.json();
+            sessionId = data.session_id;
+            const response = data.response || {};
+
+            thinking.remove();
+            addMessage(response.message || "(no message)", "agent");
+
+            const graph = response.graph || { nodes: [], edges: [] };
+            currentGraph = graph;
+            if (response.layout === "force" || response.layout === "radial") {
+                setLayout(response.layout);
+            } else {
+                render();
+            }
+        } catch (err) {
+            thinking.remove();
+            addMessage("Request failed: " + err.message, "error");
+        } finally {
+            sendBtn.disabled = false;
+            promptEl.focus();
+        }
+    }
+
+    sendBtn.addEventListener("click", send);
+    promptEl.addEventListener("keydown", e => {
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+
+    //////////////////////////////////////////////////////////////////////////
+    // Layout switching + rendering
+    //////////////////////////////////////////////////////////////////////////
+    function setLayout(layout) {
+        currentLayout = layout;
+        document.getElementById("force_btn").classList.toggle("active", layout === "force");
+        document.getElementById("radial_btn").classList.toggle("active", layout === "radial");
+        render();
+    }
+
+    function containerSize() {
+        const el = document.getElementById("svg_container");
+        return { width: el.clientWidth, height: el.clientHeight };
+    }
+
+    function render() {
+        const container = document.getElementById("svg_container");
+        d3.select("#svg_container svg").remove();
+        const empty = container.querySelector(".empty");
+        const hasGraph = currentGraph && currentGraph.nodes && currentGraph.nodes.length;
+        if (empty) empty.style.display = hasGraph ? "none" : "";
+        if (!hasGraph) return;
+        if (currentLayout === "radial") draw_radial(currentGraph);
+        else draw_force(currentGraph);
+    }
+
+    window.addEventListener("resize", () => { if (currentGraph.nodes && currentGraph.nodes.length) render(); });
+
+    //////////////////////////////////////////////////////////////////////////
+    // FORCE LAYOUT (adapted from d3js-graph-visualization skill)
+    //////////////////////////////////////////////////////////////////////////
+    function toForceData(graph) {
+        const ids = new Set(graph.nodes.map(n => n.id));
+        return {
+            nodes: graph.nodes.map(n => ({ id: n.id, c: n.weight != null ? n.weight : 1 })),
+            links: graph.edges
+                .filter(e => ids.has(e.source) && ids.has(e.target))
+                .map(e => ({ source: e.source, target: e.target, c: e.weight != null ? e.weight : 1, rel: e.relation }))
+        };
+    }
+
+    function draw_force(graph) {
+        const data = toForceData(graph);
+        const { width, height } = containerSize();
+        const maxCount = d3.max(data.nodes, d => d.c) || 1;
+
+        const svg = d3.select("#svg_container").append("svg")
+            .attr("width", width).attr("height", height);
+
+        const simulation = d3.forceSimulation()
+            .force("link", d3.forceLink().id(d => d.id).distance(140))
+            .force("charge", d3.forceManyBody().strength(-300))
+            .force("center", d3.forceCenter(width / 2, height / 2));
+
+        const link = svg.append("g").attr("class", "links")
+            .selectAll("line").data(data.links).enter().append("line")
+            .attr("stroke-width", d => Math.max(1, d.c * 6))
+            .attr("opacity", 0.6)
+            .style("stroke", d => relColor(d.rel));
+
+        const node = svg.selectAll(".node").data(data.nodes).enter().append("g")
+            .attr("class", "node")
+            .call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
+
+        node.append("circle")
+            .attr("r", 9).attr("fill", "#1f2933")
+            .attr("fill-opacity", d => 0.25 + 0.75 * d.c / maxCount);
+        node.append("text").attr("dx", 12).attr("dy", "0.35em").text(d => d.id);
+
+        simulation.nodes(data.nodes).on("tick", ticked);
+        simulation.force("link").links(data.links);
+
+        function ticked() {
+            link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+            const p = 12;
+            node.attr("transform", d => {
+                d.x = Math.max(p, Math.min(width - p, d.x));
+                d.y = Math.max(p, Math.min(height - p, d.y));
+                return `translate(${d.x},${d.y})`;
+            });
+        }
+        function dragstarted(d) { if (!d3.event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+        function dragged(d) { d.fx = d3.event.x; d.fy = d3.event.y; }
+        function dragended(d) { if (!d3.event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+    }
+
+    //////////////////////////////////////////////////////////////////////////
+    // RADIAL LAYOUT (adapted from d3js-graph-visualization skill)
+    //////////////////////////////////////////////////////////////////////////
+    const PREFIX = "root.";
+
+    function toRadialData(graph) {
+        const ids = new Set(graph.nodes.map(n => n.id));
+        const importsByNode = {};
+        graph.edges.forEach(e => {
+            if (!ids.has(e.source) || !ids.has(e.target)) return;
+            (importsByNode[e.source] = importsByNode[e.source] || [])
+                .push({ name: PREFIX + e.target, w: e.weight != null ? e.weight : 1, rel: e.relation });
+        });
+        return graph.nodes.map(n => ({
+            name: PREFIX + n.id,
+            w: n.weight != null ? n.weight : 1,
+            imports: importsByNode[n.id] || []
+        }));
+    }
+
+    function draw_radial(graph) {
+        const classes = toRadialData(graph);
+        const { width, height } = containerSize();
+        const diameter = Math.min(width, height);
+        const radius = diameter / 2, innerRadius = radius * 0.78;
+
+        const cluster = d3.cluster().size([360, innerRadius]);
+        const line = d3.radialLine().curve(d3.curveBundle.beta(0.85))
+            .radius(d => d.y).angle(d => d.x / 180 * Math.PI);
+
+        let svg = d3.select("#svg_container").append("svg")
+            .attr("width", diameter).attr("height", diameter);
+        svg = svg.append("g").attr("transform", `translate(${radius},${radius})`);
+
+        let link = svg.append("g").selectAll(".link"),
+            node = svg.append("g").selectAll(".radial-node");
+
+        function edgeOf(d) {
+            return d.source.data.imports.find(s => s.name === d.target.data.name);
+        }
+
+        const root = packageHierarchy(classes).sum(d => d.w);
+        cluster(root);
+
+        link = link.data(packageImports(root.leaves())).enter().append("path")
+            .each(d => { d.source = d[0]; d.target = d[d.length - 1]; })
+            .attr("class", "link").attr("d", line)
+            .attr("stroke-width", d => { const e = edgeOf(d); return e ? Math.max(1, e.w * 6) : 1; })
+            .attr("opacity", 0.6)
+            .style("stroke", d => { const e = edgeOf(d); return e ? relColor(e.rel) : DEFAULT_COLOR; })
+            .style("fill", "none");
+
+        node = node.data(root.leaves()).enter().append("text")
+            .attr("class", "radial-node").attr("dy", "0.31em")
+            .attr("transform", d => "rotate(" + (d.x - 90) + ")translate(" + (d.y + 8) + ",0)" + (d.x < 180 ? "" : "rotate(180)"))
+            .attr("text-anchor", d => d.x < 180 ? "start" : "end")
+            .text(d => d.data.key)
+            .on("mouseover", dp => {
+                const name = dp.data.name;
+                svg.selectAll(".link").transition().duration(250).attr("opacity", 0.05);
+                link.filter(d => d.source.data.name === name || d.target.data.name === name)
+                    .transition().duration(250).attr("opacity", 0.8);
+            })
+            .on("mouseout", () => svg.selectAll(".link").transition().duration(250).attr("opacity", 0.6));
+    }
+
+    function packageHierarchy(classes) {
+        const map = {};
+        function find(name, data) {
+            let node = map[name], i;
+            if (!node) {
+                node = map[name] = data || { name: name, children: [] };
+                if (name.length) {
+                    node.parent = find(name.substring(0, i = name.lastIndexOf(".")));
+                    node.parent.children.push(node);
+                    node.key = name.substring(i + 1);
+                }
+            }
+            return node;
+        }
+        classes.forEach(d => find(d.name, d));
+        return d3.hierarchy(map[""]);
+    }
+
+    function packageImports(nodes) {
+        const map = {}, imports = [];
+        nodes.forEach(d => { map[d.data.name] = d; });
+        nodes.forEach(d => {
+            if (d.data.imports) d.data.imports.forEach(i => {
+                if (map[i.name]) imports.push(map[d.data.name].path(map[i.name]));
+            });
+        });
+        return imports;
+    }
+</script>
+</body>
+</html>

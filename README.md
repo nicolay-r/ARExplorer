@@ -6,7 +6,22 @@ classification (bulk-chain), and graph set operations (union / intersection).
 
 ## Launching
 
-Start the agent web UI on port `2000`:
+### ARExplorer UI (chat + d3.js graph)
+
+Two-panel web UI — left panel chats with the agent, main panel renders the
+returned attitude graph with d3.js (force / radial layouts). The agent replies
+with a structured `AgentResponse` (`src/schema.py`); the chat shows `message`
+and the graph drives the visualization.
+
+```bash
+uvicorn src.server:app --port 8000
+```
+
+Then open http://127.0.0.1:8000/.
+
+### ADK dev web UI
+
+For low-level agent debugging:
 
 ```bash
 adk web --port 2000 ./src/

@@ -7,3 +7,5 @@ bulk-chain==1.2.1
 # Hosting / server (see docs/project-description.txt)
 fastapi
 uvicorn
+# Load .env settings (GOOGLE_API_KEY, REPLICATE_API_TOKEN, NER_*/RELATION_*) for the server
+python-dotenv

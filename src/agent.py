@@ -12,6 +12,7 @@ from google.adk.agents import Agent
 from google.adk.models import Gemini
 from google.genai import types
 
+from src.schema import AgentResponse
 from src.tools import (
     extract_named_entities as _extract_named_entities,
     classify_relations as _classify_relations,
@@ -62,6 +63,17 @@ Your typical workflow:
 
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
+
+OUTPUT FORMAT (important):
+- Always deliver your final answer through the `set_model_response` tool, in the
+  structured `AgentResponse` format. Never reply with plain free-form text.
+- `message`: a clear natural-language reply for the chat panel.
+- `graph`: when you have extracted entities and their attitudes, populate
+  `nodes` (each entity, with a `weight` reflecting how often it appears) and
+  `edges` (each attitude as source -> target with `relation` set to
+  "positive" / "negative" / "neutral" and a `weight` for its strength). Leave
+  `graph` empty only when there is genuinely nothing to plot.
+- `layout`: "radial" for many entities with a clear hierarchy, otherwise "force".
 """
 
 root_agent = Agent(
@@ -71,6 +83,7 @@ root_agent = Agent(
         retry_options=types.HttpRetryOptions(attempts=3, initial_delay=1.0),
     ),
     instruction=INSTRUCTION,
+    output_schema=AgentResponse,
     tools=[
         extract_named_entities,
         classify_relations,

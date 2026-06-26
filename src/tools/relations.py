@@ -9,9 +9,34 @@ Chain-of-Thought schema parameterized by the TYPE OF RELATION. See the
 `bulk-chain` skill for the underlying API.
 """
 
+import asyncio
+import concurrent.futures
 from functools import lru_cache
 
 VALID_LABELS = {"positive", "negative", "neutral"}
+
+
+def _run_in_isolated_loop(fn):
+    """Run a blocking callable in a worker thread that owns a fresh event loop.
+
+    `bulk-chain` (async_mode) drives its batches via `loop.run_until_complete()`.
+    When this tool is invoked from inside an already-running event loop — e.g.
+    the FastAPI/ADK server thread — that call raises "Cannot run the event loop
+    while another loop is running". Executing it in a dedicated thread gives
+    bulk-chain a clean, loop-free context.
+    """
+
+    def _worker():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return fn()
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(_worker).result()
 
 
 def _sentiment_schema(relation_type: str) -> list[dict]:
@@ -118,24 +143,33 @@ def classify_relations(
 
     from bulk_chain.api import iter_content
 
-    content_it = iter_content(
-        schema=_sentiment_schema(relation_type),
-        llm=llm,
-        stream=False,
-        async_mode=True,
-        batch_size=batch_size,
-        input_dicts_it=list(pairs),
-    )
+    def _collect() -> list:
+        # The generator must be both created AND consumed inside the worker
+        # thread, since iterating it is what drives bulk-chain's event loop.
+        content_it = iter_content(
+            schema=_sentiment_schema(relation_type),
+            llm=llm,
+            stream=False,
+            async_mode=True,
+            batch_size=batch_size,
+            input_dicts_it=list(pairs),
+        )
+        out = []
+        for batch in content_it:
+            for entry in batch:
+                out.append(
+                    {
+                        "source": entry.get("source"),
+                        "target": entry.get("target"),
+                        "label": _normalize_label(entry.get("label", "")),
+                        "reasoning": entry.get("reasoning", ""),
+                    }
+                )
+        return out
 
-    relations = []
-    for batch in content_it:
-        for entry in batch:
-            relations.append(
-                {
-                    "source": entry.get("source"),
-                    "target": entry.get("target"),
-                    "label": _normalize_label(entry.get("label", "")),
-                    "reasoning": entry.get("reasoning", ""),
-                }
-            )
+    try:
+        relations = _run_in_isolated_loop(_collect)
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"Relation classification failed: {exc}"}
+
     return {"status": "success", "relations": relations}

@@ -1,5 +1,7 @@
 # ARExplorer
 
+![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)
+
 An ADK 2.0 agent for extracting **Attitudes and Relations** from documents,
 exposing three tools: named-entity recognition (bulk-ner), relation/attitude
 classification (bulk-chain), and graph set operations (union / intersection).

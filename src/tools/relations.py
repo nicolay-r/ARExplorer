@@ -88,7 +88,7 @@ def _normalize_label(raw: str) -> str:
 
 
 def classify_relations(
-    pairs: list[dict],
+    pairs: list[dict] | None = None,
     relation_type: str = "sentiment",
     batch_size: int = 10,
     provider_filepath: str | None = None,
@@ -107,6 +107,9 @@ def classify_relations(
             - text: the context sentence/document mentioning both entities.
             - source: the source entity (holder of the attitude).
             - target: the target entity (object of the attitude).
+            May be ``None`` when the caller intends to supply the pairs via an
+            artifact reference — the agent-level `inflate_artifact_inputs`
+            before_tool_callback fills this in before the function runs.
         relation_type: The type of relation to assess (default "sentiment").
             This is the parameter of the underlying schema.
         batch_size: How many pairs to query per LLM batch.
@@ -121,6 +124,15 @@ def classify_relations(
           one of positive/negative/neutral.
         - error: present only when status is "error".
     """
+    if pairs is None:
+        return {
+            "status": "error",
+            "error": (
+                "classify_relations: provide `pairs` inline or supply a "
+                "`pairs_artifact` filename so the before_tool_callback can "
+                "inflate it."
+            ),
+        }
     if not pairs:
         return {"status": "success", "relations": []}
 

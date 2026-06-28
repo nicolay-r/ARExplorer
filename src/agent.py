@@ -13,7 +13,7 @@ from google.adk.models import Gemini
 from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
-from src.callbacks import offload_tool_output
+from src.callbacks import inflate_artifact_inputs, offload_tool_output
 from src.schema import AgentResponse
 from src.tools import (
     extract_named_entities as _extract_named_entities,
@@ -22,7 +22,34 @@ from src.tools import (
 )
 
 
-def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
+# The `*_artifact` parameters live ONLY on these wrappers (not on the underlying
+# `src.tools.*` functions) because that is what ADK 2.0 turns into the LLM-facing
+# JSON schema. The before_tool_callback `inflate_artifact_inputs` consumes them
+# and rewrites `args` so the wrapper itself never sees them. Per-param
+# descriptions live in the docstring because ADK calls `get_type_hints` without
+# `include_extras=True`, which strips any `Annotated[..., Field(...)]` metadata
+# before schema generation.
+
+
+def extract_named_entities(
+    texts: list[str] | None = None,
+    texts_artifact: str | None = None,
+    batch_size: int = 10,
+) -> dict:
+    """Extract named entities from a collection of texts.
+
+    Provide EXACTLY ONE of `texts` or `texts_artifact`:
+
+    - `texts`: a list of strings to annotate, supplied inline. Best for short
+      inputs that fit comfortably in the prompt.
+    - `texts_artifact`: filename of a session artifact whose JSON content is
+      the input. The artifact must decode to a list of strings, or to an
+      object with a `texts` list (e.g. `{"texts": [...]}`). The before_tool
+      callback loads the artifact and substitutes its content before this
+      function runs. Prefer this form for large corpora.
+
+    `batch_size` controls how many texts are processed per batch.
+    """
     return _extract_named_entities(
         texts,
         batch_size=batch_size,
@@ -34,10 +61,25 @@ def extract_named_entities(texts: list[str], batch_size: int = 10) -> dict:
 
 
 def classify_relations(
-    pairs: list[dict],
+    pairs: list[dict] | None = None,
+    pairs_artifact: str | None = None,
     relation_type: str = "sentiment",
     batch_size: int = 10,
 ) -> dict:
+    """Classify the attitude/relation between entity pairs.
+
+    Provide EXACTLY ONE of `pairs` or `pairs_artifact`:
+
+    - `pairs`: list of `{text, source, target}` dicts to classify inline.
+    - `pairs_artifact`: filename of a session artifact whose JSON content is
+      the pairs list. Must decode to a list of `{text, source, target}`
+      dicts, or to an object with a `pairs` list. The before_tool callback
+      loads the artifact and substitutes its content before this function
+      runs. Prefer this form when the pairs list is already in the session.
+
+    `relation_type` parameterises the underlying Chain-of-Thought schema
+    (default "sentiment"). `batch_size` controls per-batch LLM throughput.
+    """
     return _classify_relations(
         pairs,
         relation_type=relation_type,
@@ -82,6 +124,18 @@ TOOL OUTPUTS ARE OFFLOADED TO ARTIFACTS:
 - Only call `load_artifacts` when you genuinely need the content of an
   artifact; the counts alone are usually enough to decide what to do next.
 
+TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
+- `extract_named_entities` accepts `texts_artifact` instead of `texts`.
+- `classify_relations` accepts `pairs_artifact` instead of `pairs`.
+- The artifact must JSON-decode to a list of the expected shape (strings for
+  texts, {text, source, target} dicts for pairs), or to an object with a
+  matching key (`{"texts": [...]}` / `{"pairs": [...]}`). The framework loads
+  the artifact and substitutes its content for the inline list before the
+  tool runs.
+- Prefer the artifact form whenever the input list is large or already lives
+  in the session (e.g. uploaded by the user, or written by an earlier turn).
+  Provide exactly one of the inline or artifact form per call.
+
 OUTPUT FORMAT (important):
 - Always deliver your final answer through the `set_model_response` tool, in the
   structured `AgentResponse` format. Never reply with plain free-form text.
@@ -109,5 +163,6 @@ root_agent = Agent(
         graph_operation,
         load_artifacts_tool,
     ],
+    before_tool_callback=inflate_artifact_inputs,
     after_tool_callback=offload_tool_output,
 )

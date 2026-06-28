@@ -49,7 +49,7 @@ def _collect_entities(result: list) -> list:
 
 
 def extract_named_entities(
-    texts: list[str],
+    texts: list[str] | None = None,
     batch_size: int = 10,
     src_dir: str | None = None,
     class_filepath: str | None = None,
@@ -64,7 +64,10 @@ def extract_named_entities(
     it chunks long inputs so the language model context limit is never exceeded.
 
     Args:
-        texts: The texts to annotate.
+        texts: The texts to annotate. May be ``None`` when the caller intends
+            to supply the texts via an artifact reference — the agent-level
+            `inflate_artifact_inputs` before_tool_callback fills this in
+            before the function runs.
         batch_size: How many texts to process per batch.
         src_dir: Directory containing the NER provider script.
         class_filepath: Provider script filename (relative to src_dir).
@@ -80,6 +83,15 @@ def extract_named_entities(
           flattened `entities` list of {value, type, id}.
         - error: present only when status is "error".
     """
+    if texts is None:
+        return {
+            "status": "error",
+            "error": (
+                "extract_named_entities: provide `texts` inline or supply a "
+                "`texts_artifact` filename so the before_tool_callback can "
+                "inflate it."
+            ),
+        }
     if not texts:
         return {"status": "success", "documents": []}
 

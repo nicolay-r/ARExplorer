@@ -23,6 +23,7 @@ def _get_annotator(src_dir, class_filepath, class_name, model, chunk_limit):
 
     ner_model = dynamic_init(
         src_dir=src_dir,
+        # TODO: remove hardcoded values.
         class_filepath=class_filepath or "dp_130.py",
         class_name=class_name or "DeepPavlovNER",
     )(model=model or "ner_ontonotes_bert")

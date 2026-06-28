@@ -10,6 +10,7 @@ import os
 
 from google.adk.agents import Agent
 from google.adk.models import Gemini
+from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
 from src.callbacks import offload_tool_output
@@ -65,10 +66,21 @@ Your typical workflow:
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
 
-Note: each successful tool call also returns an `artifact` field with the
-filename and version of the full result saved to the session artifact store.
-You can ignore it for normal reasoning; the trimmed payload already contains
-everything you need to chain tools together.
+TOOL OUTPUTS ARE OFFLOADED TO ARTIFACTS:
+- `extract_named_entities`, `classify_relations`, and `graph_operation` do NOT
+  return their raw data to you. Each successful call returns only:
+    * `status`, lightweight counts (e.g. `document_count` / `entity_count`,
+      `relation_count` / `label_counts`, `node_count` / `edge_count`), and
+    * an `artifact` field of shape {"name": "<file>.json", "version": <int>}.
+  The full `documents` / `relations` / `graph` payload is saved as a JSON
+  artifact in the session artifact store.
+- To read the actual data (form entity pairs, look up labels, populate the
+  final graph), call the `load_artifacts` tool with the artifact name, e.g.
+  `load_artifacts(artifact_names=["extract_named_entities_<id>.json"])`. The
+  JSON content of each requested artifact is then injected into your next
+  turn so you can reason over it.
+- Only call `load_artifacts` when you genuinely need the content of an
+  artifact; the counts alone are usually enough to decide what to do next.
 
 OUTPUT FORMAT (important):
 - Always deliver your final answer through the `set_model_response` tool, in the
@@ -77,7 +89,8 @@ OUTPUT FORMAT (important):
 - `graph`: when you have extracted entities and their attitudes, populate
   `nodes` (each entity, with a `weight` reflecting how often it appears) and
   `edges` (each attitude as source -> target with `relation` set to
-  "positive" / "negative" / "neutral" and a `weight` for its strength). Leave
+  "positive" / "negative" / "neutral" and a `weight` for its strength). Load
+  the relevant artifact(s) first so you have the underlying data. Leave
   `graph` empty only when there is genuinely nothing to plot.
 - `layout`: "radial" for many entities with a clear hierarchy, otherwise "force".
 """
@@ -94,6 +107,7 @@ root_agent = Agent(
         extract_named_entities,
         classify_relations,
         graph_operation,
+        load_artifacts_tool,
     ],
     after_tool_callback=offload_tool_output,
 )

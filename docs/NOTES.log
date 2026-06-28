@@ -3,3 +3,5 @@ NOTES:
     2. Added d3js-graph-visualization SKILL from the ARE-d3js template: covers radial + force graph layouts (d3 v4), with standalone runnable snippets placed as resource examples (resources/force-graph.html, resources/radial-graph.html) plus the full template.html for reference.
         * Generalized the edge 'sent' (sentiment) field in the d3js-graph-visualization snippets to a generic 'rel' relation label with a configurable RELATION_COLORS map (sentiment is now just one example config); template.html kept as the verbatim sentiment-specific source.
     3. Added callbacks to offload tool output to artifact store.
+    4. Added support for artifact inputs in tools (before_tool_callback to inflate them into the inline lists the tools expect).
+    5. Found bug in non-registered pairs tool. 

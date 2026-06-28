@@ -4,15 +4,17 @@ Two complementary callbacks keep tool outputs and inputs out of the LLM
 context window:
 
   - `offload_tool_output` (after_tool_callback): when one of the heavy tools
-    (`extract_named_entities`, `classify_relations`, `graph_operation`)
-    succeeds, the full payload is persisted as a session-scoped JSON artifact
-    and the LLM only sees status + summary counts + an `artifact` pointer.
+    (`extract_named_entities`, `form_entity_pairs`, `classify_relations`,
+    `graph_operation`) succeeds, the full payload is persisted as a
+    session-scoped JSON artifact and the LLM only sees status + summary
+    counts + an `artifact` pointer.
 
   - `inflate_artifact_inputs` (before_tool_callback): the inverse on the way
-    in — the LLM may hand `extract_named_entities` / `classify_relations` an
-    artifact filename (`texts_artifact` / `pairs_artifact`) instead of a long
-    inline list. This callback loads that artifact, JSON-decodes it, and
-    rewrites `args` so the underlying tool sees the actual list.
+    in — the LLM may hand `extract_named_entities`, `form_entity_pairs`, or
+    `classify_relations` an artifact filename (`texts_artifact` /
+    `documents_artifact` / `pairs_artifact`) instead of a long inline list.
+    This callback loads that artifact, JSON-decodes it, and rewrites `args`
+    so the underlying tool sees the actual list.
 
 Both follow the LangChain-style "args_schema swap" pattern from the ADK
 guidance: the LLM declares the lightweight artifact reference, the callback
@@ -40,6 +42,7 @@ logger = logging.getLogger(__name__)
 # `kind` is informational; we only validate that the inflated value is a list.
 _INFLATE_RULES: dict[str, tuple[str, str, str]] = {
     "extract_named_entities": ("texts_artifact", "texts", "string"),
+    "form_entity_pairs": ("documents_artifact", "documents", "NER document"),
     "classify_relations": ("pairs_artifact", "pairs", "pair object"),
 }
 
@@ -148,6 +151,7 @@ async def inflate_artifact_inputs(
 # cheap no-op for any other tool the agent might gain in the future.
 _OFFLOAD_TOOLS = {
     "extract_named_entities",
+    "form_entity_pairs",
     "classify_relations",
     "graph_operation",
 }
@@ -156,9 +160,9 @@ _OFFLOAD_TOOLS = {
 def _summarize(tool_name: str, response: dict) -> dict:
     """Build the data-free summary the LLM sees in place of the tool output.
 
-    Only top-level status and lightweight counts: no `documents`, `relations`,
-    or `graph` payloads. The agent must call `load_artifacts` to read the
-    actual content.
+    Only top-level status and lightweight counts: no `documents`, `pairs`,
+    `relations`, or `graph` payloads. The agent must call `load_artifacts`
+    to read the actual content.
     """
     status = response.get("status", "success")
 
@@ -170,6 +174,13 @@ def _summarize(tool_name: str, response: dict) -> dict:
             "entity_count": sum(
                 len(doc.get("entities") or []) for doc in documents
             ),
+        }
+
+    if tool_name == "form_entity_pairs":
+        pairs = response.get("pairs") or []
+        return {
+            "status": status,
+            "pair_count": len(pairs),
         }
 
     if tool_name == "classify_relations":

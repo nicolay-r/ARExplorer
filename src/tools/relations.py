@@ -39,6 +39,7 @@ def _run_in_isolated_loop(fn):
         return executor.submit(_worker).result()
 
 
+# TODO. Generalize to schema (as sengiment is a type of relation)
 def _sentiment_schema(relation_type: str) -> list[dict]:
     """Build a Chain-of-Thought schema for a given relation type.
 
@@ -91,6 +92,7 @@ def classify_relations(
     relation_type: str = "sentiment",
     batch_size: int = 10,
     provider_filepath: str | None = None,
+    # TODO: remove hardcoded values.
     model_name: str = "meta/meta-llama-3-70b-instruct",
     api_token: str = "",
 ) -> dict:

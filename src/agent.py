@@ -20,7 +20,7 @@ from src.tools import (
     extract_named_entities as _extract_named_entities,
     form_entity_pairs as _form_entity_pairs,
     classify_relations as _classify_relations,
-    graph_operation
+    graph_operation as _graph_operation,
 )
 
 
@@ -116,6 +116,45 @@ def form_entity_pairs(
     )
 
 
+def graph_operation(
+    operation: str,
+    graph_a: dict | None = None,
+    graph_b: dict | None = None,
+    graph_a_artifact: str | None = None,
+    graph_b_artifact: str | None = None,
+) -> dict:
+    """Combine two attitude/relation graphs with a set operation.
+
+    `operation` is either ``"union"`` (all nodes/edges present in either
+    input, deduplicated) or ``"intersection"`` (only nodes/edges present in
+    both).
+
+    For each of the two inputs provide EXACTLY ONE of the inline / artifact
+    forms:
+
+    - `graph_a` / `graph_b`: graph dict shaped
+      ``{"nodes": [...], "edges": [{"source", "target", "label"}, ...]}``.
+    - `graph_a_artifact` / `graph_b_artifact`: filename of a session
+      artifact whose JSON decodes either to a bare graph dict (above shape)
+      or to an object containing a top-level `"graph"` key with the graph
+      dict — which is exactly the shape produced by an earlier
+      `graph_operation` call's artifact (a previous offloaded
+      ``{"status": "success", "graph": {...}}`` payload). The before_tool
+      callback loads the artifact and substitutes its content before this
+      function runs.
+
+    Mixing forms across the two inputs is fine (e.g. inline `graph_a` plus
+    `graph_b_artifact`). Use the artifact form when combining the outputs
+    of two previous `graph_operation` runs without re-loading them
+    yourself.
+    """
+    return _graph_operation(
+        operation=operation,
+        graph_a=graph_a,
+        graph_b=graph_b,
+    )
+
+
 def classify_relations(
     pairs: list[dict] | None = None,
     pairs_artifact: str | None = None,
@@ -169,7 +208,10 @@ Your typical workflow:
    the pairs artifact name as `pairs_artifact` from the previous step.
 4. When the user wants to combine or compare result sets, build graphs of the
    form {"nodes": [...], "edges": [{"source", "target", "label"}]} and use
-   `graph_operation` with "union" or "intersection".
+   `graph_operation` with "union" or "intersection". When you already have
+   the graphs as session artifacts (e.g. the outputs of two earlier
+   `graph_operation` runs), pass them as `graph_a_artifact` /
+   `graph_b_artifact` instead of inlining the graph dicts.
 
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
@@ -199,16 +241,23 @@ TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
 - `extract_named_entities` accepts `texts_artifact` instead of `texts`.
 - `form_entity_pairs` accepts `documents_artifact` instead of `documents`.
 - `classify_relations` accepts `pairs_artifact` instead of `pairs`.
-- The artifact must JSON-decode to a list of the expected shape (strings for
-  texts, {text, entities} dicts for documents, {text, source, target} dicts
-  for pairs), or to an object with a matching key (`{"texts": [...]}` /
-  `{"documents": [...]}` / `{"pairs": [...]}` — which is exactly the shape
-  the previous tool's artifact already has). The framework loads the
-  artifact and substitutes its content for the inline list before the tool
-  runs.
-- Prefer the artifact form whenever the input list is large or already lives
-  in the session (e.g. uploaded by the user, or written by an earlier turn).
-  Provide exactly one of the inline or artifact form per call.
+- `graph_operation` accepts `graph_a_artifact` / `graph_b_artifact`
+  instead of `graph_a` / `graph_b` (you may mix forms across the two
+  inputs).
+- For list-shaped tools the artifact must JSON-decode to a list of the
+  expected shape (strings for texts, {text, entities} dicts for documents,
+  {text, source, target} dicts for pairs) or to an object with a matching
+  key (`{"texts": [...]}` / `{"documents": [...]}` / `{"pairs": [...]}` —
+  which is exactly the shape the previous tool's artifact already has).
+- For `graph_operation` the artifact must JSON-decode to a graph dict
+  ({"nodes": [...], "edges": [...]}) or to an object with a `"graph"` key
+  containing such a dict — exactly what an earlier `graph_operation` call
+  has already written.
+- The framework loads the artifact and substitutes its content for the
+  inline value before the tool runs. Prefer the artifact form whenever the
+  input is large or already lives in the session (e.g. uploaded by the
+  user, or written by an earlier turn). Provide exactly one of the inline
+  or artifact form per input.
 
 OUTPUT FORMAT (important):
 - Always deliver your final answer through the `set_model_response` tool, in the

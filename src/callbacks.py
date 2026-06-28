@@ -10,11 +10,14 @@ context window:
     counts + an `artifact` pointer.
 
   - `inflate_artifact_inputs` (before_tool_callback): the inverse on the way
-    in — the LLM may hand `extract_named_entities`, `form_entity_pairs`, or
-    `classify_relations` an artifact filename (`texts_artifact` /
-    `documents_artifact` / `pairs_artifact`) instead of a long inline list.
+    in — the LLM may hand any of the heavy tools an artifact filename
+    instead of the inline payload:
+        * `extract_named_entities` ← `texts_artifact`
+        * `form_entity_pairs`      ← `documents_artifact`
+        * `classify_relations`     ← `pairs_artifact`
+        * `graph_operation`        ← `graph_a_artifact` and/or `graph_b_artifact`
     This callback loads that artifact, JSON-decodes it, and rewrites `args`
-    so the underlying tool sees the actual list.
+    so the underlying tool sees the actual list / graph dict.
 
 Both follow the LangChain-style "args_schema swap" pattern from the ADK
 guidance: the LLM declares the lightweight artifact reference, the callback
@@ -38,12 +41,36 @@ logger = logging.getLogger(__name__)
 # before_tool_callback: artifact reference -> inflated list
 # ---------------------------------------------------------------------------
 
-# Maps tool name -> (artifact-ref arg, target arg, expected element kind).
-# `kind` is informational; we only validate that the inflated value is a list.
-_INFLATE_RULES: dict[str, tuple[str, str, str]] = {
-    "extract_named_entities": ("texts_artifact", "texts", "string"),
-    "form_entity_pairs": ("documents_artifact", "documents", "NER document"),
-    "classify_relations": ("pairs_artifact", "pairs", "pair object"),
+# Maps tool name -> list of inflation rules.
+#
+# Each rule is (artifact-ref arg, target arg, expected element kind,
+# expected top-level type, wrapper key). A tool may declare multiple rules
+# when it accepts more than one artifact input (e.g. `graph_operation`
+# consumes two graphs).
+#
+# `kind` is informational and used only in error messages. Validation
+# happens against `expected_type` (`list` for list-shaped inputs, `dict` for
+# graph-shaped inputs). `wrapper_key` is the key under which the natural
+# wrapper artifact (the one written by `offload_tool_output`) stores the
+# payload; the callback first looks for that key inside the decoded dict
+# and only falls back to using the decoded value as-is when the key is
+# absent. For most tools `wrapper_key == target_arg`, but graphs differ
+# because `graph_operation` writes its output under `"graph"`, not under
+# `"graph_a"` / `"graph_b"`.
+_INFLATE_RULES: dict[str, list[tuple[str, str, str, type, str]]] = {
+    "extract_named_entities": [
+        ("texts_artifact", "texts", "string", list, "texts"),
+    ],
+    "form_entity_pairs": [
+        ("documents_artifact", "documents", "NER document", list, "documents"),
+    ],
+    "classify_relations": [
+        ("pairs_artifact", "pairs", "pair object", list, "pairs"),
+    ],
+    "graph_operation": [
+        ("graph_a_artifact", "graph_a", "graph", dict, "graph"),
+        ("graph_b_artifact", "graph_b", "graph", dict, "graph"),
+    ],
 }
 
 
@@ -66,79 +93,100 @@ async def inflate_artifact_inputs(
     args: dict,
     tool_context: ToolContext,
 ) -> Optional[dict]:
-    """Swap an artifact reference in `args` for the JSON list it contains.
+    """Swap any artifact references in `args` for their JSON payloads.
 
-    For `extract_named_entities` and `classify_relations`, the LLM may pass a
-    `*_artifact` filename instead of the inline `texts` / `pairs` list. When
-    that key is present, this callback:
+    For each tool listed in `_INFLATE_RULES`, the LLM may pass one or more
+    `*_artifact` filenames in place of the corresponding inline argument.
+    For every such rule present in `args` this callback:
 
       1. Loads the artifact via the session artifact service.
       2. JSON-decodes the inline data; accepts either
-            - a plain list (used directly), or
-            - a dict containing a `<target_arg>` list (e.g. `{"texts": [...]}`).
+            - a value matching the rule's `expected_type` directly (a list
+              for `texts`/`documents`/`pairs`, a dict for `graph_a`/`graph_b`),
+              or
+            - a wrapper dict containing the target key, e.g.
+              `{"texts": [...]}` or `{"status": "success", "graph": {...}}`
+              (the natural shape produced by the offload callback's
+              artifacts).
       3. Rewrites `args` so the artifact key is dropped and the target arg
-         (`texts` / `pairs`) holds the inflated list.
+         (`texts` / `documents` / `pairs` / `graph_a` / `graph_b`) holds the
+         inflated value.
 
-    The actual tool function never sees `texts_artifact` / `pairs_artifact`
-    (ADK filters out args that aren't in the function signature anyway).
+    The actual tool function never sees the `*_artifact` keys (ADK filters
+    out args that aren't in the function signature anyway).
 
     Returns ``None`` to fall through to the real tool, or a synthetic error
-    dict that short-circuits the call when the artifact is missing / not a
-    valid JSON list.
+    dict that short-circuits the call when an artifact is missing / not a
+    valid JSON value of the expected shape. Inflation stops at the first
+    failing artifact for a given call.
     """
-    rule = _INFLATE_RULES.get(tool.name)
-    if rule is None:
+    rules = _INFLATE_RULES.get(tool.name)
+    if not rules:
         return None
 
-    artifact_arg, target_arg, kind = rule
-    if artifact_arg not in args:
-        return None
+    for artifact_arg, target_arg, kind, expected_type, wrapper_key in rules:
+        if artifact_arg not in args:
+            continue
 
-    artifact_name = args.get(artifact_arg)
-    args.pop(artifact_arg, None)
-    if not artifact_name:
-        return None
+        artifact_name = args.pop(artifact_arg, None)
+        if not artifact_name:
+            continue
 
-    try:
-        part = await tool_context.load_artifact(artifact_name)
-    except ValueError as exc:
-        return {
-            "status": "error",
-            "error": (
-                f"Cannot load artifact {artifact_name!r} for {tool.name}: {exc}"
-            ),
-        }
+        try:
+            part = await tool_context.load_artifact(artifact_name)
+        except ValueError as exc:
+            return {
+                "status": "error",
+                "error": (
+                    f"Cannot load artifact {artifact_name!r} for {tool.name}: "
+                    f"{exc}"
+                ),
+            }
 
-    if part is None:
-        return {
-            "status": "error",
-            "error": f"Artifact {artifact_name!r} not found in session.",
-        }
+        if part is None:
+            return {
+                "status": "error",
+                "error": f"Artifact {artifact_name!r} not found in session.",
+            }
 
-    try:
-        decoded = _decode_artifact(part)
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return {
-            "status": "error",
-            "error": (
-                f"Artifact {artifact_name!r} is not valid UTF-8/JSON: {exc}"
-            ),
-        }
+        try:
+            decoded = _decode_artifact(part)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return {
+                "status": "error",
+                "error": (
+                    f"Artifact {artifact_name!r} is not valid UTF-8/JSON: {exc}"
+                ),
+            }
 
-    if isinstance(decoded, list):
-        value = decoded
-    elif isinstance(decoded, dict) and isinstance(decoded.get(target_arg), list):
-        value = decoded[target_arg]
-    else:
-        return {
-            "status": "error",
-            "error": (
-                f"Artifact {artifact_name!r} must JSON-decode to a list of "
-                f"{kind} values, or to an object with a {target_arg!r} list."
-            ),
-        }
+        # Wrapper dicts (the typical shape produced by `offload_tool_output`,
+        # e.g. {"status": "success", "graph": {...}}) get unwrapped first;
+        # a bare value of `expected_type` is used as-is so users can feed in
+        # artifacts they uploaded themselves.
+        if (
+            isinstance(decoded, dict)
+            and isinstance(decoded.get(wrapper_key), expected_type)
+        ):
+            value = decoded[wrapper_key]
+        elif isinstance(decoded, expected_type):
+            value = decoded
+        else:
+            if expected_type is list:
+                error_msg = (
+                    f"Artifact {artifact_name!r} must JSON-decode to a list "
+                    f"of {kind} values (or to an object with a "
+                    f"{wrapper_key!r} list)."
+                )
+            else:
+                error_msg = (
+                    f"Artifact {artifact_name!r} must JSON-decode to a {kind} "
+                    f"dict (or to an object with a {wrapper_key!r} key "
+                    "holding one)."
+                )
+            return {"status": "error", "error": error_msg}
 
-    args[target_arg] = value
+        args[target_arg] = value
+
     return None
 
 

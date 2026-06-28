@@ -47,15 +47,23 @@ def _dedup_edges(edges) -> list:
     return out
 
 
-def graph_operation(operation: str, graph_a: dict, graph_b: dict) -> dict:
+def graph_operation(
+    operation: str,
+    graph_a: dict | None = None,
+    graph_b: dict | None = None,
+) -> dict:
     """Combine two graphs with a set operation.
 
     Args:
         operation: Either "union" or "intersection".
             - union: all nodes and edges present in either graph (deduplicated).
             - intersection: only nodes and edges present in both graphs.
-        graph_a: First graph with "nodes" and "edges" lists.
-        graph_b: Second graph with "nodes" and "edges" lists.
+        graph_a: First graph with "nodes" and "edges" lists. May be ``None``
+            when the caller intends to supply it via an artifact reference —
+            the agent-level `inflate_artifact_inputs` before_tool_callback
+            fills it in before the function runs.
+        graph_b: Second graph with "nodes" and "edges" lists. Same artifact
+            semantics as `graph_a`.
 
     Returns:
         A dict with:
@@ -68,6 +76,21 @@ def graph_operation(operation: str, graph_a: dict, graph_b: dict) -> dict:
         return {
             "status": "error",
             "error": f"Unknown operation '{operation}'. Use 'union' or 'intersection'.",
+        }
+
+    missing = [
+        name
+        for name, value in (("graph_a", graph_a), ("graph_b", graph_b))
+        if value is None
+    ]
+    if missing:
+        return {
+            "status": "error",
+            "error": (
+                f"graph_operation: missing {', '.join(missing)}. Provide each "
+                "graph inline or supply a `<name>_artifact` filename so the "
+                "before_tool_callback can inflate it."
+            ),
         }
 
     nodes_a = graph_a.get("nodes", []) if isinstance(graph_a, dict) else []

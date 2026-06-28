@@ -1,9 +1,10 @@
 """ARExplorer agent — extracts Attitudes and Relations from documents.
 
-ADK 2.0 root agent exposing three tools (wrapped over their Python APIs):
+ADK 2.0 root agent exposing four tools (wrapped over their Python APIs):
   #1 extract_named_entities  — bulk-ner annotation over massive text collections
-  #2 classify_relations      — bulk-chain attitude/relation classification
-  #3 graph_operation         — union / intersection over attitude graphs
+  #2 form_entity_pairs       — turn NER documents into candidate {source,target,text} pairs
+  #3 classify_relations      — bulk-chain attitude/relation classification
+  #4 graph_operation         — union / intersection over attitude graphs
 """
 
 import os
@@ -17,8 +18,9 @@ from src.callbacks import inflate_artifact_inputs, offload_tool_output
 from src.schema import AgentResponse
 from src.tools import (
     extract_named_entities as _extract_named_entities,
+    form_entity_pairs as _form_entity_pairs,
     classify_relations as _classify_relations,
-    graph_operation,
+    graph_operation
 )
 
 
@@ -60,6 +62,60 @@ def extract_named_entities(
     )
 
 
+def form_entity_pairs(
+    documents: list[dict] | None = None,
+    documents_artifact: str | None = None,
+    entity_types: list[str] | None = None,
+    directed: bool = True,
+    window_size: int = 5,
+    context_pad: int = 5,
+    skip_self_pairs: bool = True,
+    max_pairs: int | None = 50,
+) -> dict:
+    """Form candidate {text, source, target} pairs from NER documents.
+
+    This is the bridge between `extract_named_entities` and
+    `classify_relations`: it consumes per-document entity lists and emits the
+    pair triples the attitude classifier expects. To keep the pair list and
+    each pair's context compact:
+
+    - Only pairs whose two occurrences are within `window_size` words of
+      each other (gap STRICTLY BETWEEN them) are emitted (default 25).
+    - Each pair's `text` is the LOCAL context around the pair (the words
+      from the earlier occurrence to the later, plus `context_pad` extra
+      words on each side, default 5) — NOT the full source document.
+    - At most `max_pairs` pairs are returned overall (default 50); when more
+      candidates pass the window filter, those with the SMALLEST gap are
+      kept first. Pass ``None`` to disable the cap. This bounds the cost of
+      the downstream `classify_relations` call.
+
+    Provide EXACTLY ONE of `documents` or `documents_artifact`:
+
+    - `documents`: inline list of `{text, entities}` dicts (the shape produced
+      by `extract_named_entities`). Each `entities` item must at least carry
+      `value` (the entity surface form) and `type` (NER class).
+    - `documents_artifact`: filename of a session artifact whose JSON content
+      is the NER output (i.e. `{"documents": [...]}` or a bare list of such
+      dicts). The before_tool callback loads and substitutes it. This is the
+      natural plumbing right after `extract_named_entities` — pass the
+      artifact name from its summary directly.
+
+    `entity_types`: optional whitelist of NER classes (e.g. ``["PERSON",
+    "ORG"]``); ``None`` keeps every entity type. `directed`: when True the
+    pair (A, B) and (B, A) are emitted separately. `skip_self_pairs`: drops
+    pairs where source == target by surface form.
+    """
+    return _form_entity_pairs(
+        documents=documents,
+        entity_types=entity_types,
+        directed=directed,
+        window_size=window_size,
+        context_pad=context_pad,
+        skip_self_pairs=skip_self_pairs,
+        max_pairs=max_pairs,
+    )
+
+
 def classify_relations(
     pairs: list[dict] | None = None,
     pairs_artifact: str | None = None,
@@ -98,10 +154,20 @@ Your typical workflow:
 1. Use `extract_named_entities` to annotate named entities across the provided
    texts. This handles large volumes by chunking, so prefer it over reasoning
    about entities yourself.
-2. Form candidate entity pairs from the extracted entities and use
-   `classify_relations` to determine the attitude (positive, negative, or
-   neutral) the source entity expresses towards the target entity.
-3. When the user wants to combine or compare result sets, build graphs of the
+2. Use `form_entity_pairs` to turn the NER output into candidate
+   `{text, source, target}` triples. Pass the NER artifact name as
+   `documents_artifact` — you do NOT need to load the NER artifact yourself
+   first. Each pair's `text` is a SMALL LOCAL WINDOW around the two entities
+   (not the full source text); pairs whose entities are more than
+   `window_size` words apart (default 5) are dropped. The tool also caps
+   the output at `max_pairs` (default 50) — keeping the closest-gap pairs
+   first — so downstream relation classification stays cheap. Tune
+   `window_size` / `context_pad` / `max_pairs` only when the user
+   explicitly asks. Optionally filter by NER class via `entity_types`.
+3. Use `classify_relations` to determine the attitude (positive, negative, or
+   neutral) that each source entity expresses towards the target entity. Pass
+   the pairs artifact name as `pairs_artifact` from the previous step.
+4. When the user wants to combine or compare result sets, build graphs of the
    form {"nodes": [...], "edges": [{"source", "target", "label"}]} and use
    `graph_operation` with "union" or "intersection".
 
@@ -109,29 +175,37 @@ Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
 
 TOOL OUTPUTS ARE OFFLOADED TO ARTIFACTS:
-- `extract_named_entities`, `classify_relations`, and `graph_operation` do NOT
-  return their raw data to you. Each successful call returns only:
+- `extract_named_entities`, `form_entity_pairs`, `classify_relations`, and
+  `graph_operation` do NOT return their raw data to you. Each successful call
+  returns only:
     * `status`, lightweight counts (e.g. `document_count` / `entity_count`,
-      `relation_count` / `label_counts`, `node_count` / `edge_count`), and
+      `pair_count`, `relation_count` / `label_counts`,
+      `node_count` / `edge_count`), and
     * an `artifact` field of shape {"name": "<file>.json", "version": <int>}.
-  The full `documents` / `relations` / `graph` payload is saved as a JSON
-  artifact in the session artifact store.
-- To read the actual data (form entity pairs, look up labels, populate the
-  final graph), call the `load_artifacts` tool with the artifact name, e.g.
-  `load_artifacts(artifact_names=["extract_named_entities_<id>.json"])`. The
+  The full `documents` / `pairs` / `relations` / `graph` payload is saved as
+  a JSON artifact in the session artifact store.
+- To read the actual data (look up labels, populate the final graph), call
+  the `load_artifacts` tool with the artifact name, e.g.
+  `load_artifacts(artifact_names=["classify_relations_<id>.json"])`. The
   JSON content of each requested artifact is then injected into your next
   turn so you can reason over it.
 - Only call `load_artifacts` when you genuinely need the content of an
   artifact; the counts alone are usually enough to decide what to do next.
+  In particular, chaining NER -> pairs -> relations does NOT require any
+  `load_artifacts` call — each step accepts the previous step's artifact
+  name as a `*_artifact` argument.
 
 TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
 - `extract_named_entities` accepts `texts_artifact` instead of `texts`.
+- `form_entity_pairs` accepts `documents_artifact` instead of `documents`.
 - `classify_relations` accepts `pairs_artifact` instead of `pairs`.
 - The artifact must JSON-decode to a list of the expected shape (strings for
-  texts, {text, source, target} dicts for pairs), or to an object with a
-  matching key (`{"texts": [...]}` / `{"pairs": [...]}`). The framework loads
-  the artifact and substitutes its content for the inline list before the
-  tool runs.
+  texts, {text, entities} dicts for documents, {text, source, target} dicts
+  for pairs), or to an object with a matching key (`{"texts": [...]}` /
+  `{"documents": [...]}` / `{"pairs": [...]}` — which is exactly the shape
+  the previous tool's artifact already has). The framework loads the
+  artifact and substitutes its content for the inline list before the tool
+  runs.
 - Prefer the artifact form whenever the input list is large or already lives
   in the session (e.g. uploaded by the user, or written by an earlier turn).
   Provide exactly one of the inline or artifact form per call.
@@ -159,6 +233,7 @@ root_agent = Agent(
     output_schema=AgentResponse,
     tools=[
         extract_named_entities,
+        form_entity_pairs,
         classify_relations,
         graph_operation,
         load_artifacts_tool,

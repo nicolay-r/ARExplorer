@@ -12,6 +12,7 @@ from google.adk.agents import Agent
 from google.adk.models import Gemini
 from google.genai import types
 
+from src.callbacks import offload_tool_output
 from src.schema import AgentResponse
 from src.tools import (
     extract_named_entities as _extract_named_entities,
@@ -64,6 +65,11 @@ Your typical workflow:
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
 
+Note: each successful tool call also returns an `artifact` field with the
+filename and version of the full result saved to the session artifact store.
+You can ignore it for normal reasoning; the trimmed payload already contains
+everything you need to chain tools together.
+
 OUTPUT FORMAT (important):
 - Always deliver your final answer through the `set_model_response` tool, in the
   structured `AgentResponse` format. Never reply with plain free-form text.
@@ -89,4 +95,5 @@ root_agent = Agent(
         classify_relations,
         graph_operation,
     ],
+    after_tool_callback=offload_tool_output,
 )

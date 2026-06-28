@@ -26,6 +26,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 from fastapi import FastAPI  # noqa: E402
 from fastapi.responses import FileResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
+from google.adk.artifacts import InMemoryArtifactService  # noqa: E402
 from google.adk.runners import Runner  # noqa: E402
 from google.adk.sessions import InMemorySessionService  # noqa: E402
 from google.genai import types  # noqa: E402
@@ -44,6 +45,7 @@ _runner = Runner(
     agent=root_agent,
     app_name=APP_NAME,
     session_service=_session_service,
+    artifact_service=InMemoryArtifactService(),
 )
 
 

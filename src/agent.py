@@ -16,7 +16,11 @@ from google.adk.tools import ToolContext
 from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
-from src.callbacks import inflate_artifact_inputs, offload_tool_output
+from src.callbacks import (
+    ensure_nonempty_response,
+    inflate_artifact_inputs,
+    offload_tool_output,
+)
 from src.schema import AgentResponse
 from src.tools import (
     extract_named_entities as _extract_named_entities,
@@ -392,4 +396,5 @@ root_agent = Agent(
     ],
     before_tool_callback=inflate_artifact_inputs,
     after_tool_callback=offload_tool_output,
+    after_model_callback=ensure_nonempty_response,
 )

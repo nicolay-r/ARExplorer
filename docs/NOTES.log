@@ -10,3 +10,7 @@ NOTES:
     8. Added a two-layer empty-response fallback so the user always sees something on termination. 
         Agent level: an after_model_callback (ensure_nonempty_response) catches empty model turns (finishReason STOP with no content/tool call) and substitutes a readable retry message — works in every runner, incl. adk web. 
         Server level: _ensure_message guarantees a non-blank message and recovers the output-built graph; kept task-agnostic by comparing the structured output against a defaults-only schema instance instead of referencing graph-specific fields.
+    10. Added progress reporting for long-running tools (classify_relations).
+        - Added a progress bar to the UI.
+        - Fixed "Event loop is closed" on the 2nd+ classify_relations call. Root cause: `_get_llm` was @lru_cache'd, so the bulk-chain provider adapter (and its lazily-created httpx.AsyncClient) was reused across calls; that async client binds to the event loop that first drives it, but each run uses its own short-lived loop (see `_run_in_isolated_loop`) which is closed afterwards — so the cached client referenced a dead loop on the next run.
+    11. Simplified the classify_relations prompt schema from a 2-step CoT (reasoning -> label) to a single label-only prompt (halves LLM calls per pair).

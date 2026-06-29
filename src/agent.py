@@ -7,6 +7,7 @@ ADK 2.0 root agent exposing four tools (wrapped over their Python APIs):
   #4 graph_operation         — union / intersection over attitude graphs
 """
 
+import asyncio
 import json
 import os
 
@@ -16,6 +17,7 @@ from google.adk.tools import ToolContext
 from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
+from src import progress
 from src.callbacks.after_model import ensure_nonempty_response
 from src.callbacks.before_tool import inflate_artifact_inputs
 from src.callbacks.after_tool import offload_tool_output
@@ -165,7 +167,7 @@ def graph_operation(
     )
 
 
-def classify_relations(
+async def classify_relations(
     pairs: list[dict] | None = None,
     pairs_artifact: str | None = None,
     relation_type: str = "sentiment",
@@ -184,14 +186,36 @@ def classify_relations(
 
     `relation_type` parameterises the underlying Chain-of-Thought schema
     (default "sentiment"). `batch_size` controls per-batch LLM throughput.
+
+    This can be slow (bulk-chain iterates over many pairs), so the heavy work
+    runs in a worker thread (keeping the event loop free) and streams
+    incremental ``(done, total)`` progress to the UI via the active progress
+    publisher when one is installed (see `src.progress`).
     """
-    return _classify_relations(
+    publisher = progress.get_publisher()
+    progress_callback = None
+    if publisher is not None:
+        total_hint = len(pairs) if pairs else 0
+
+        def progress_callback(done: int, total: int) -> None:
+            publisher(
+                {
+                    "type": "progress",
+                    "tool": "classify_relations",
+                    "done": done,
+                    "total": total or total_hint,
+                }
+            )
+
+    return await asyncio.to_thread(
+        _classify_relations,
         pairs,
         relation_type=relation_type,
         batch_size=batch_size,
         provider_filepath=os.environ.get("RELATION_PROVIDER_FILEPATH"),
         model_name=os.environ.get("RELATION_MODEL"),
         api_token=os.environ.get("REPLICATE_API_TOKEN", ""),
+        progress_callback=progress_callback,
     )
 
 
@@ -379,7 +403,7 @@ OUTPUT FORMAT (important):
 root_agent = Agent(
     name="arexplorer_agent",
     model=Gemini(
-        model="gemini-2.5-flash-lite",
+        model="gemini-2.5-flash",
         retry_options=types.HttpRetryOptions(attempts=10, initial_delay=1.0),
     ),
     instruction=INSTRUCTION,

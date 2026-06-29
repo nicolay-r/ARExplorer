@@ -11,6 +11,7 @@ The agent replies with a structured `AgentResponse` (see `src/schema.py`); the
 `/api/chat` endpoint returns that JSON straight to the browser.
 """
 
+import asyncio
 import json
 import uuid
 from pathlib import Path
@@ -32,6 +33,7 @@ from google.adk.sessions import InMemorySessionService  # noqa: E402
 from google.genai import types  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
+from src import progress  # noqa: E402
 from src.agent import OUTPUT_ARTIFACT_NAME, root_agent  # noqa: E402
 from src.schema import AgentResponse  # noqa: E402
 
@@ -321,9 +323,15 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
     """Run the agent and stream server-side activity as Server-Sent Events.
 
     Emits one `log` message per tool call / tool result (and any intermediate
-    model text) as the agent works, then a single `final` message carrying the
-    parsed `AgentResponse`. Errors are surfaced as an `error` message so the UI
-    can stop the thinking indicator gracefully.
+    model text) as the agent works, `progress` messages while a long-running
+    tool reports incremental status (see `src.progress`), then a single `final`
+    message carrying the parsed `AgentResponse`. Errors are surfaced as an
+    `error` message so the UI can stop the thinking indicator gracefully.
+
+    The agent run is driven in a background task that feeds a queue, while
+    long-running tools publish progress onto the SAME queue from a worker
+    thread. This lets us interleave progress with events even though a single
+    tool call blocks the `run_async` iteration until it returns.
     """
     session_id = req.session_id or uuid.uuid4().hex
 
@@ -335,25 +343,60 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             role="user", parts=[types.Part.from_text(text=req.message)]
         )
 
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def publish(item: dict) -> None:
+            # Called from a tool's worker thread; hop back onto the loop safely.
+            loop.call_soon_threadsafe(queue.put_nowait, ("progress", item))
+
+        async def run_agent() -> None:
+            try:
+                async for event in _runner.run_async(
+                    user_id=APP_NAME, session_id=session_id, new_message=message
+                ):
+                    await queue.put(("event", event))
+            except Exception as exc:  # noqa: BLE001 - surfaced to the UI below
+                await queue.put(("error", exc))
+            finally:
+                await queue.put(("done", None))
+
+        # Install the publisher BEFORE spawning the task so the copied context
+        # the task runs in (and thus the tool wrappers) sees it.
+        token = progress.set_publisher(publish)
+        task = asyncio.create_task(run_agent())
+
         final_text = ""
         output_ref = None
         try:
-            async for event in _runner.run_async(
-                user_id=APP_NAME, session_id=session_id, new_message=message
-            ):
-                for line in _event_logs(event):
-                    yield _sse({"type": "log", "text": line})
-
-                output_ref = _output_artifact_ref(event) or output_ref
-                if (
-                    event.is_final_response()
-                    and event.content
-                    and event.content.parts
-                ):
-                    final_text = event.content.parts[0].text or ""
-        except Exception as exc:  # noqa: BLE001 - report any agent failure to UI
-            yield _sse({"type": "error", "error": str(exc)})
-            return
+            while True:
+                kind, payload = await queue.get()
+                if kind == "progress":
+                    yield _sse(payload)
+                elif kind == "event":
+                    event = payload
+                    for line in _event_logs(event):
+                        yield _sse({"type": "log", "text": line})
+                    output_ref = _output_artifact_ref(event) or output_ref
+                    if (
+                        event.is_final_response()
+                        and event.content
+                        and event.content.parts
+                    ):
+                        final_text = event.content.parts[0].text or ""
+                elif kind == "error":
+                    yield _sse({"type": "error", "error": str(payload)})
+                    return
+                elif kind == "done":
+                    break
+        finally:
+            progress.reset_publisher(token)
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
         response = await _finalize(session_id, final_text, output_ref)
         yield _sse(

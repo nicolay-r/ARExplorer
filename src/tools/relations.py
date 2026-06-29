@@ -12,8 +12,12 @@ Chain-of-Thought schema parameterized by the TYPE OF RELATION. See the
 import asyncio
 import concurrent.futures
 from functools import lru_cache
+from typing import Callable, Optional
 
 VALID_LABELS = {"positive", "negative", "neutral"}
+
+# Reports incremental progress as ``(done, total)`` pair counts.
+ProgressCallback = Callable[[int, int], None]
 
 
 def _run_in_isolated_loop(fn):
@@ -95,6 +99,7 @@ def classify_relations(
     # TODO: remove hardcoded values.
     model_name: str = "meta/meta-llama-3-70b-instruct",
     api_token: str = "",
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> dict:
     """Classify the attitude/relation between pairs of entities.
 
@@ -116,6 +121,11 @@ def classify_relations(
         provider_filepath: Path to the bulk-chain provider adapter script.
         model_name: Model identifier passed to the provider.
         api_token: API token for the provider (empty to rely on provider default).
+        progress_callback: Optional callable invoked after each completed
+            batch with ``(done, total)`` pair counts. It may be called from a
+            worker thread, so it must be cheap and thread-safe (the agent wraps
+            it to forward updates to the UI). ``None`` disables progress
+            reporting.
 
     Returns:
         A dict with:
@@ -157,6 +167,16 @@ def classify_relations(
 
     from bulk_chain.api import iter_content
 
+    total = len(pairs)
+
+    def _report(done: int) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(done, total)
+        except Exception:  # noqa: BLE001 - progress must never break the run
+            pass
+
     def _collect() -> list:
         # The generator must be both created AND consumed inside the worker
         # thread, since iterating it is what drives bulk-chain's event loop.
@@ -169,6 +189,7 @@ def classify_relations(
             input_dicts_it=list(pairs),
         )
         out = []
+        _report(0)
         for batch in content_it:
             for entry in batch:
                 out.append(
@@ -179,6 +200,9 @@ def classify_relations(
                         "reasoning": entry.get("reasoning", ""),
                     }
                 )
+            # bulk-chain yields one batch at a time; report cumulative progress
+            # so the UI can show "done / total" as classification proceeds.
+            _report(len(out))
         return out
 
     try:

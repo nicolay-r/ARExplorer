@@ -28,6 +28,10 @@
         .thinking-log li::before { content: "›"; position: absolute; left: 2px; color: #9aa5b1; }
         .thinking-log li.active { color: #2850b4; }
         .thinking-log li.active::before { content: "▸"; color: #2850b4; }
+        .thinking-bar { margin-top: 4px; height: 4px; border-radius: 2px; background: #e1e5ea; overflow: hidden; }
+        .thinking-bar > span { display: block; height: 100%; width: 0; background: #2850b4; transition: width 0.2s ease; }
+        .thinking-bar.indeterminate > span { width: 40%; animation: thinking-slide 1s linear infinite; }
+        @keyframes thinking-slide { from { margin-left: -40%; } to { margin-left: 100%; } }
         #composer { display: flex; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
         #composer textarea { flex: 1; resize: none; height: 46px; padding: 8px; border: 1px solid #cbd2d9; border-radius: 8px; font: inherit; }
         #composer button { padding: 0 16px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
@@ -92,6 +96,11 @@
     const DEFAULT_COLOR = "#52606d";
     const relColor = rel => RELATION_COLORS[(rel || "").toLowerCase()] || DEFAULT_COLOR;
 
+    // Human-readable labels for server-side progress events (keyed by tool).
+    const PROGRESS_LABELS = {
+        classify_relations: "Classifying relations"
+    };
+
     let currentLayout = "force";
     let currentGraph = { nodes: [], edges: [] };
     let sessionId = null;
@@ -126,6 +135,16 @@
         messagesEl.appendChild(div);
         messagesEl.scrollTop = messagesEl.scrollHeight;
 
+        function activeLine() {
+            let li = log.querySelector("li.active");
+            if (!li) {
+                li = document.createElement("li");
+                li.className = "active";
+                log.appendChild(li);
+            }
+            return li;
+        }
+
         return {
             element: div,
             addLog(text) {
@@ -135,6 +154,30 @@
                 li.className = "active";
                 li.textContent = text;
                 log.appendChild(li);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            },
+            // Update the current step with a live progress counter + bar.
+            setProgress({ label, done, total }) {
+                const li = activeLine();
+                let span = li.querySelector(".thinking-text");
+                if (!span) {
+                    li.textContent = "";
+                    span = document.createElement("span");
+                    span.className = "thinking-text";
+                    li.appendChild(span);
+                    const bar = document.createElement("div");
+                    bar.className = "thinking-bar";
+                    bar.appendChild(document.createElement("span"));
+                    li.appendChild(bar);
+                }
+                const hasTotal = Number.isFinite(total) && total > 0;
+                const pct = hasTotal ? Math.round((done / total) * 100) : 0;
+                span.textContent = hasTotal
+                    ? `${label} ${done}/${total} (${pct}%)`
+                    : `${label} ${done}…`;
+                const bar = li.querySelector(".thinking-bar");
+                bar.classList.toggle("indeterminate", !hasTotal);
+                bar.firstChild.style.width = hasTotal ? pct + "%" : "";
                 messagesEl.scrollTop = messagesEl.scrollHeight;
             },
             done() {
@@ -186,6 +229,12 @@
                         sessionId = evt.session_id;
                     } else if (evt.type === "log") {
                         thinking.addLog(evt.text);
+                    } else if (evt.type === "progress") {
+                        thinking.setProgress({
+                            label: PROGRESS_LABELS[evt.tool] || "Working",
+                            done: evt.done,
+                            total: evt.total
+                        });
                     } else if (evt.type === "final") {
                         sessionId = evt.session_id || sessionId;
                         finalResponse = evt.response || {};

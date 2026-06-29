@@ -45,26 +45,20 @@ def _run_in_isolated_loop(fn):
 
 # TODO. Generalize to schema (as sengiment is a type of relation)
 def _sentiment_schema(relation_type: str) -> list[dict]:
-    """Build a Chain-of-Thought schema for a given relation type.
+    """Build a single-prompt classification schema for a given relation type.
 
     The relation type is the parameter of the schema (e.g. "sentiment"),
     matching the design where the schema's parameter is the TYPE OF RELATION.
+    A single step asks the model to emit the attitude label directly.
     """
     return [
         {
             "prompt": (
                 "Context: {text}\n"
-                f"Analyse the {relation_type} attitude expressed by the source "
-                "entity '{source}' towards the target entity '{target}'. "
-                "Reason briefly step by step."
-            ),
-            "out": "reasoning",
-        },
-        {
-            "prompt": (
-                "Reasoning: {reasoning}\n"
-                "Classify the attitude strictly as exactly one of: "
-                "positive, negative, neutral. Respond with a single lowercase word."
+                f"Classify the {relation_type} attitude expressed by the source "
+                "entity '{source}' towards the target entity '{target}' strictly "
+                "as exactly one of: positive, negative, neutral. Respond with a "
+                "single lowercase word."
             ),
             "out": "label",
         },

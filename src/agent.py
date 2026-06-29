@@ -7,10 +7,12 @@ ADK 2.0 root agent exposing four tools (wrapped over their Python APIs):
   #4 graph_operation         — union / intersection over attitude graphs
 """
 
+import json
 import os
 
 from google.adk.agents import Agent
 from google.adk.models import Gemini
+from google.adk.tools import ToolContext
 from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
@@ -21,7 +23,13 @@ from src.tools import (
     form_entity_pairs as _form_entity_pairs,
     classify_relations as _classify_relations,
     graph_operation as _graph_operation,
+    build_output_graph as _build_output_graph,
 )
+
+# Canonical session artifact under which the `output` tool stores the finished,
+# schema-validated AgentResponse. The server prefers this (for the matching
+# tool call) over any graph the model hand-writes into set_model_response.
+OUTPUT_ARTIFACT_NAME = "agent_response.json"
 
 
 # The `*_artifact` parameters live ONLY on these wrappers (not on the underlying
@@ -185,6 +193,85 @@ def classify_relations(
     )
 
 
+async def output(
+    message: str,
+    layout: str = "force",
+    relations: list[dict] | None = None,
+    relations_artifact: str | None = None,
+    tool_context: ToolContext = None,
+) -> dict:
+    """Build the final visualization graph and emit the structured response.
+
+    Use this as the LAST step whenever you have classified relations to plot.
+    It converts the `classify_relations` output into the UI graph for you, so
+    you DO NOT hand-write the (potentially long) `graph` yourself — that avoids
+    truncation and schema mistakes.
+
+    Provide EXACTLY ONE of `relations` or `relations_artifact`:
+
+    - `relations`: inline list of `{source, target, label}` dicts.
+    - `relations_artifact`: filename of the `classify_relations` session
+      artifact (its summary's `artifact.name`). The before_tool callback loads
+      it and substitutes the relations list before this function runs. Prefer
+      this form — it is the whole point of the tool.
+
+    `message` is the natural-language reply for the chat panel (required, never
+    empty). `layout` is "force" (default) or "radial".
+
+    Returns a small summary (`status`, `node_count`, `edge_count`, and an
+    `artifact` pointer). The full, schema-validated `AgentResponse` (your
+    `message` + the built `graph` + `layout`) is saved as the
+    ``agent_response.json`` session artifact, which the server uses as the
+    authoritative final answer. After calling this tool, finish via
+    `set_model_response` with the same `message` and an EMPTY `graph`.
+    """
+    if relations is None:
+        return {
+            "status": "error",
+            "error": (
+                "output: provide `relations` inline or a `relations_artifact` "
+                "filename (the classify_relations artifact) so the "
+                "before_tool_callback can inflate it."
+            ),
+        }
+
+    graph = _build_output_graph(relations)
+    response = AgentResponse.model_validate(
+        {"message": message, "layout": layout, "graph": graph}
+    )
+
+    summary = {
+        "status": "success",
+        "node_count": len(response.graph.nodes),
+        "edge_count": len(response.graph.edges),
+    }
+
+    if tool_context is not None:
+        payload = json.dumps(
+            response.model_dump(), ensure_ascii=False
+        ).encode("utf-8")
+        part = types.Part(
+            inline_data=types.Blob(
+                mime_type="application/json", data=payload
+            )
+        )
+        try:
+            version = await tool_context.save_artifact(
+                OUTPUT_ARTIFACT_NAME, part
+            )
+            summary["artifact"] = {
+                "name": OUTPUT_ARTIFACT_NAME,
+                "version": version,
+            }
+        except ValueError as exc:
+            return {
+                "status": "error",
+                "error": f"output: failed to save response artifact: {exc}",
+            }
+
+    return summary
+
+
 INSTRUCTION = """\
 You are ARExplorer, an assistant that extracts and explores Attitudes and
 Relations between named entities found in documents.
@@ -206,7 +293,14 @@ Your typical workflow:
 3. Use `classify_relations` to determine the attitude (positive, negative, or
    neutral) that each source entity expresses towards the target entity. Pass
    the pairs artifact name as `pairs_artifact` from the previous step.
-4. When the user wants to combine or compare result sets, build graphs of the
+4. Use `output` to turn the `classify_relations` result into the final
+   visualization. Pass the classify_relations artifact name as
+   `relations_artifact` plus your `message` and `layout`. The tool builds the
+   graph (nodes + edges) deterministically from the artifact and saves the
+   finished structured response — so you must NOT load the relations yourself
+   or hand-write the graph. This is the standard final step whenever there are
+   classified relations to plot.
+5. When the user wants to combine or compare result sets, build graphs of the
    form {"nodes": [...], "edges": [{"source", "target", "label"}]} and use
    `graph_operation` with "union" or "intersection". When you already have
    the graphs as session artifacts (e.g. the outputs of two earlier
@@ -241,6 +335,8 @@ TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
 - `extract_named_entities` accepts `texts_artifact` instead of `texts`.
 - `form_entity_pairs` accepts `documents_artifact` instead of `documents`.
 - `classify_relations` accepts `pairs_artifact` instead of `pairs`.
+- `output` accepts `relations_artifact` instead of `relations` — pass the
+  `classify_relations` artifact name here.
 - `graph_operation` accepts `graph_a_artifact` / `graph_b_artifact`
   instead of `graph_a` / `graph_b` (you may mix forms across the two
   inputs).
@@ -262,13 +358,19 @@ TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
 OUTPUT FORMAT (important):
 - Always deliver your final answer through the `set_model_response` tool, in the
   structured `AgentResponse` format. Never reply with plain free-form text.
-- `message`: a clear natural-language reply for the chat panel.
-- `graph`: when you have extracted entities and their attitudes, populate
-  `nodes` (each entity, with a `weight` reflecting how often it appears) and
-  `edges` (each attitude as source -> target with `relation` set to
-  "positive" / "negative" / "neutral" and a `weight` for its strength). Load
-  the relevant artifact(s) first so you have the underlying data. Leave
-  `graph` empty only when there is genuinely nothing to plot.
+- When there are classified relations to plot, the graph is produced by the
+  `output` tool (see workflow step 4), NOT by you. In that case call `output`
+  first, then call `set_model_response` with your `message` and `layout` and an
+  EMPTY `graph` — the server uses the graph that `output` built. Do NOT
+  hand-write graph nodes/edges yourself; that output can be long and is
+  error-prone.
+- `message`: a clear natural-language reply for the chat panel. Summarize what
+  was found and how to read the graph.
+- `graph`: leave EMPTY when you used `output`. Only populate it directly for a
+  graph you assembled yourself without `output` (e.g. the result of a
+  `graph_operation`), using `nodes` ({id, weight}) and `edges` ({source,
+  target, relation in "positive"/"negative"/"neutral", weight}). Leave empty
+  when there is genuinely nothing to plot.
 - `layout`: "radial" for many entities with a clear hierarchy, otherwise "force".
 """
 
@@ -276,7 +378,7 @@ root_agent = Agent(
     name="arexplorer_agent",
     model=Gemini(
         model="gemini-2.5-flash-lite",
-        retry_options=types.HttpRetryOptions(attempts=3, initial_delay=1.0),
+        retry_options=types.HttpRetryOptions(attempts=10, initial_delay=1.0),
     ),
     instruction=INSTRUCTION,
     output_schema=AgentResponse,
@@ -285,6 +387,7 @@ root_agent = Agent(
         form_entity_pairs,
         classify_relations,
         graph_operation,
+        output,
         load_artifacts_tool,
     ],
     before_tool_callback=inflate_artifact_inputs,

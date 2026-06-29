@@ -67,6 +67,9 @@ _INFLATE_RULES: dict[str, list[tuple[str, str, str, type, str]]] = {
     "classify_relations": [
         ("pairs_artifact", "pairs", "pair object", list, "pairs"),
     ],
+    "output": [
+        ("relations_artifact", "relations", "relation object", list, "relations"),
+    ],
     "graph_operation": [
         ("graph_a_artifact", "graph_a", "graph", dict, "graph"),
         ("graph_b_artifact", "graph_b", "graph", dict, "graph"),

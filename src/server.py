@@ -32,7 +32,7 @@ from google.adk.sessions import InMemorySessionService  # noqa: E402
 from google.genai import types  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
-from src.agent import root_agent  # noqa: E402
+from src.agent import OUTPUT_ARTIFACT_NAME, root_agent  # noqa: E402
 from src.schema import AgentResponse  # noqa: E402
 
 APP_NAME = "arexplorer"
@@ -41,11 +41,12 @@ STATIC_DIR = Path(__file__).parent / "static"
 app = FastAPI(title="ARExplorer UI")
 
 _session_service = InMemorySessionService()
+_artifact_service = InMemoryArtifactService()
 _runner = Runner(
     agent=root_agent,
     app_name=APP_NAME,
     session_service=_session_service,
-    artifact_service=InMemoryArtifactService(),
+    artifact_service=_artifact_service,
 )
 
 
@@ -79,6 +80,68 @@ def _parse_final(text: str) -> AgentResponse:
             return AgentResponse(message=text)
 
 
+def _output_artifact_ref(event) -> dict | None:
+    """Return the artifact pointer if this event is an `output` tool response.
+
+    The `output` tool builds the graph deterministically and persists the
+    finished `AgentResponse` as a versioned artifact, returning
+    ``{"artifact": {"name", "version"}}``. We capture that pointer so the
+    server can load the authoritative response for THIS turn's tool call
+    (loading by version keeps it turn-safe — a later conversational turn that
+    doesn't call `output` won't resurrect a stale graph).
+    """
+    for resp in event.get_function_responses():
+        if resp.name != "output":
+            continue
+        payload = resp.response
+        if isinstance(payload, dict) and isinstance(payload.get("artifact"), dict):
+            artifact = payload["artifact"]
+            if artifact.get("name"):
+                return artifact
+    return None
+
+
+async def _load_output_response(
+    session_id: str, ref: dict
+) -> AgentResponse | None:
+    """Load + validate the AgentResponse the `output` tool saved this turn."""
+    try:
+        part = await _artifact_service.load_artifact(
+            app_name=APP_NAME,
+            user_id=APP_NAME,
+            session_id=session_id,
+            filename=ref["name"],
+            version=ref.get("version"),
+        )
+    except Exception:  # noqa: BLE001 - any artifact-service hiccup falls back
+        return None
+    if part is None or part.inline_data is None or part.inline_data.data is None:
+        return None
+
+    data = part.inline_data.data
+    text = data.decode("utf-8") if isinstance(data, bytes) else data
+    try:
+        return AgentResponse.model_validate_json(text)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _finalize(
+    session_id: str, final_text: str, output_ref: dict | None
+) -> AgentResponse:
+    """Pick the authoritative final response for a turn.
+
+    Prefers the graph the `output` tool built (so the model never has to
+    hand-write a long graph into `set_model_response`); otherwise falls back to
+    parsing the model's structured final text.
+    """
+    if output_ref is not None:
+        built = await _load_output_response(session_id, output_ref)
+        if built is not None:
+            return built
+    return _parse_final(final_text)
+
+
 # Human-readable verbs for the tools the agent can call, used to turn raw
 # event traffic into a friendly activity log streamed to the UI.
 _TOOL_LABELS = {
@@ -86,6 +149,7 @@ _TOOL_LABELS = {
     "form_entity_pairs": "Forming entity pairs",
     "classify_relations": "Classifying relations",
     "graph_operation": "Updating the relation graph",
+    "output": "Building the output graph",
     "load_artifacts": "Loading intermediate data",
     "set_model_response": "Composing the final answer",
 }
@@ -183,13 +247,15 @@ async def chat(req: ChatRequest) -> dict:
     message = types.Content(role="user", parts=[types.Part.from_text(text=req.message)])
 
     final_text = ""
+    output_ref = None
     async for event in _runner.run_async(
         user_id=APP_NAME, session_id=session_id, new_message=message
     ):
+        output_ref = _output_artifact_ref(event) or output_ref
         if event.is_final_response() and event.content and event.content.parts:
             final_text = event.content.parts[0].text or ""
 
-    response = _parse_final(final_text)
+    response = await _finalize(session_id, final_text, output_ref)
     return {"session_id": session_id, "response": response.model_dump()}
 
 
@@ -213,6 +279,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         )
 
         final_text = ""
+        output_ref = None
         try:
             async for event in _runner.run_async(
                 user_id=APP_NAME, session_id=session_id, new_message=message
@@ -220,6 +287,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                 for line in _event_logs(event):
                     yield _sse({"type": "log", "text": line})
 
+                output_ref = _output_artifact_ref(event) or output_ref
                 if (
                     event.is_final_response()
                     and event.content
@@ -230,7 +298,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             yield _sse({"type": "error", "error": str(exc)})
             return
 
-        response = _parse_final(final_text)
+        response = await _finalize(session_id, final_text, output_ref)
         yield _sse(
             {
                 "type": "final",

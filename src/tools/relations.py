@@ -72,14 +72,33 @@ def _sentiment_schema(relation_type: str) -> list[dict]:
 
 
 @lru_cache(maxsize=None)
-def _get_llm(provider_filepath, model_name, api_token):
-    """Lazily build and cache the bulk-chain LLM adapter for a configuration."""
+def _get_llm_class(provider_filepath):
+    """Load (and cache) the bulk-chain provider CLASS for a given adapter file.
+
+    Only the class is cached — it is loop-independent, so importing the adapter
+    module repeatedly is avoided. The instance is built fresh per call (see
+    `_build_llm`).
+    """
     from bulk_chain.core.utils import dynamic_init
 
+    return dynamic_init(class_filepath=provider_filepath)
+
+
+def _build_llm(provider_filepath, model_name, api_token):
+    """Build a FRESH bulk-chain LLM adapter for a single classification run.
+
+    The adapter must NOT be cached across calls: providers (e.g. Replicate)
+    lazily create an ``httpx.AsyncClient`` bound to the event loop that first
+    drives them. Because each run uses its own short-lived event loop (see
+    `_run_in_isolated_loop`), reusing an adapter from a previous run would make
+    it reference a now-closed loop and raise "Event loop is closed" on the
+    second invocation. Re-instantiating per call keeps the async client bound
+    to the current run's loop.
+    """
     kwargs = {"model_name": model_name}
     if api_token:
         kwargs["api_token"] = api_token
-    return dynamic_init(class_filepath=provider_filepath)(**kwargs)
+    return _get_llm_class(provider_filepath)(**kwargs)
 
 
 def _normalize_label(raw: str) -> str:
@@ -158,7 +177,7 @@ def classify_relations(
         }
 
     try:
-        llm = _get_llm(provider_filepath, model_name, api_token)
+        llm = _build_llm(provider_filepath, model_name, api_token)
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "error",

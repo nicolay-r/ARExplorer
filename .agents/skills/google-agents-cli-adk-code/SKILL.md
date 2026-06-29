@@ -61,11 +61,13 @@ The first two are cheatsheets for common patterns; for broad or deep knowledge, 
 |------|-------------|
 | `references/adk-python.md` | Core ADK API: `Agent`, tools, callbacks, plugins, state, artifacts, multi-agent systems, `SequentialAgent` / `ParallelAgent` / `LoopAgent`, custom `BaseAgent`. Default for most agents. |
 | `references/adk-workflows.md` | Graph-based Workflow API (ADK 2.0): nodes, edges, fan-out/fan-in, HITL, parallel processing. Use when you need explicit graph topology. |
+| `/adk-event` | Deep dive on `Event` / `EventActions`: conversation history, `runner.run()` event stream, `state_delta`, tool-call lifecycle. |
 | `curl https://adk.dev/llms.txt` | Docs index (every page title + URL). Fetch it, then `WebFetch` the specific page for anything beyond the cheatsheets. |
 | Installed ADK package | Exact signatures and symbols — inspect the source (see "Inspecting ADK Source Code" in `references/adk-python.md`). |
 
 ## Related Skills
 
+- `/adk-event` — Event objects, event stream from `runner.run()`, and `EventActions` side effects
 - `/google-agents-cli-workflow` — Development workflow, coding guidelines, and operational rules
 - `/google-agents-cli-scaffold` — Project creation and enhancement with `agents-cli scaffold create` / `scaffold enhance`
 - `/google-agents-cli-eval` — Evaluation methodology, dataset schema, and the eval-fix loop

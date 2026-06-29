@@ -5,3 +5,4 @@ NOTES:
     3. Added callbacks to offload tool output to artifact store.
     4. Added support for artifact inputs in tools (before_tool_callback to inflate them into the inline lists the tools expect).
     5. Found bug in non-registered pairs tool. 
+    6. Added thinking bubble to the UI. The default asset of SKILLS for agent does not cover a work with event model. We integrate 08_event.md into adk-event SKILL from the ADK from tutorial here: https://github.com/Kjdragan/google-adk-tutorial/blob/main/08_event.md

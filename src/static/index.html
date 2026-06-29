@@ -22,6 +22,12 @@
         .msg.agent { background: #fff; border: 1px solid #e1e5ea; border-bottom-left-radius: 3px; }
         .msg.error { background: #fde8e6; color: #b42323; border: 1px solid #f4c7c3; }
         .msg.thinking { color: #7b8794; font-style: italic; }
+        .thinking-head { font-weight: 600; font-style: normal; color: #52606d; }
+        .thinking-log { list-style: none; margin: 6px 0 0; padding: 0; font-style: normal; font-size: 12px; }
+        .thinking-log li { padding: 2px 0 2px 16px; position: relative; color: #7b8794; }
+        .thinking-log li::before { content: "›"; position: absolute; left: 2px; color: #9aa5b1; }
+        .thinking-log li.active { color: #2850b4; }
+        .thinking-log li.active::before { content: "▸"; color: #2850b4; }
         #composer { display: flex; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
         #composer textarea { flex: 1; resize: none; height: 46px; padding: 8px; border: 1px solid #cbd2d9; border-radius: 8px; font: inherit; }
         #composer button { padding: 0 16px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
@@ -106,26 +112,93 @@
         return div;
     }
 
+    // A "thinking" bubble that grows a live log of server-side actions.
+    function addThinking() {
+        const div = document.createElement("div");
+        div.className = "msg agent thinking";
+        const head = document.createElement("div");
+        head.className = "thinking-head";
+        head.textContent = "thinking…";
+        const log = document.createElement("ul");
+        log.className = "thinking-log";
+        div.appendChild(head);
+        div.appendChild(log);
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+
+        return {
+            element: div,
+            addLog(text) {
+                const prev = log.querySelector("li.active");
+                if (prev) prev.classList.remove("active");
+                const li = document.createElement("li");
+                li.className = "active";
+                li.textContent = text;
+                log.appendChild(li);
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+            },
+            done() {
+                const active = log.querySelector("li.active");
+                if (active) active.classList.remove("active");
+                head.textContent = "done";
+            },
+            remove() { div.remove(); }
+        };
+    }
+
     async function send() {
         const text = promptEl.value.trim();
         if (!text) return;
         promptEl.value = "";
         sendBtn.disabled = true;
         addMessage(text, "user");
-        const thinking = addMessage("thinking…", "agent thinking");
+        const thinking = addThinking();
 
         try {
-            const res = await fetch("/api/chat", {
+            const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ message: text, session_id: sessionId })
             });
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            const data = await res.json();
-            sessionId = data.session_id;
-            const response = data.response || {};
+            if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let finalResponse = null;
+            let streamError = null;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                // SSE messages are separated by a blank line.
+                let sep;
+                while ((sep = buffer.indexOf("\n\n")) !== -1) {
+                    const chunk = buffer.slice(0, sep);
+                    buffer = buffer.slice(sep + 2);
+                    const line = chunk.split("\n").find(l => l.startsWith("data:"));
+                    if (!line) continue;
+                    const evt = JSON.parse(line.slice(5).trim());
+
+                    if (evt.type === "session") {
+                        sessionId = evt.session_id;
+                    } else if (evt.type === "log") {
+                        thinking.addLog(evt.text);
+                    } else if (evt.type === "final") {
+                        sessionId = evt.session_id || sessionId;
+                        finalResponse = evt.response || {};
+                    } else if (evt.type === "error") {
+                        streamError = evt.error;
+                    }
+                }
+            }
+
+            if (streamError) throw new Error(streamError);
 
             thinking.remove();
+            const response = finalResponse || {};
             addMessage(response.message || "(no message)", "agent");
 
             const graph = response.graph || { nodes: [], edges: [] };

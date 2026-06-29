@@ -126,6 +126,61 @@ async def _load_output_response(
         return None
 
 
+# Shown when the model ends its turn without producing any usable response
+# (e.g. an empty `finishReason: STOP` turn with no parts and no tool call).
+_EMPTY_TURN_FALLBACK = (
+    "The model ended its turn without returning a response — this happens "
+    "intermittently with the lightweight model. Please try sending your "
+    "request again."
+)
+
+# Shown when the structured output carries a payload but the model left the
+# natural-language `message` empty. Intentionally task-agnostic: it makes no
+# assumption about what the schema's payload fields represent.
+_RESULT_READY_FALLBACK = "Here is the result for your request."
+
+
+def _carries_payload(response: AgentResponse) -> bool:
+    """True if the structured output has content beyond the chat `message`.
+
+    Stays task-agnostic by comparing every non-`message` field against a
+    pristine, defaults-only instance of the same model rather than inspecting
+    any specific field (e.g. `graph`). If `AgentResponse` later gains or
+    changes payload fields, this keeps working without edits.
+    """
+    current = response.model_dump()
+    try:
+        baseline = type(response)(message=current.get("message", "")).model_dump()
+    except Exception:  # noqa: BLE001 - schema without a trivially-empty instance
+        baseline = {}
+    for name, value in current.items():
+        if name == "message":
+            continue
+        if value and value != baseline.get(name):
+            return True
+    return False
+
+
+def _ensure_message(response: AgentResponse) -> AgentResponse:
+    """Guarantee the user always sees something on termination.
+
+    The model occasionally returns an empty turn (`finishReason: STOP` with no
+    content and no `set_model_response` call), which would otherwise surface as
+    a blank chat bubble. If the structured output still carries a payload we
+    acknowledge it generically; otherwise we explain the empty turn and invite
+    a retry. Stays decoupled from what the workflow actually produces.
+    """
+    if response.message and response.message.strip():
+        return response
+
+    response.message = (
+        _RESULT_READY_FALLBACK
+        if _carries_payload(response)
+        else _EMPTY_TURN_FALLBACK
+    )
+    return response
+
+
 async def _finalize(
     session_id: str, final_text: str, output_ref: dict | None
 ) -> AgentResponse:
@@ -133,13 +188,15 @@ async def _finalize(
 
     Prefers the graph the `output` tool built (so the model never has to
     hand-write a long graph into `set_model_response`); otherwise falls back to
-    parsing the model's structured final text.
+    parsing the model's structured final text. The result always carries a
+    non-empty `message` (see `_ensure_message`) so an empty model turn never
+    reaches the UI as a blank bubble.
     """
     if output_ref is not None:
         built = await _load_output_response(session_id, output_ref)
         if built is not None:
-            return built
-    return _parse_final(final_text)
+            return _ensure_message(built)
+    return _ensure_message(_parse_final(final_text))
 
 
 # Human-readable verbs for the tools the agent can call, used to turn raw

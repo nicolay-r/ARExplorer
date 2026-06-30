@@ -29,6 +29,7 @@ from src.tools import (
     graph_operation as _graph_operation,
     build_output_graph as _build_output_graph,
 )
+from src.tools.graph_model import Graph
 
 # Canonical session artifact under which the `output` tool stores the finished,
 # schema-validated AgentResponse. The server prefers this (for the matching
@@ -144,8 +145,10 @@ def graph_operation(
     For each of the two inputs provide EXACTLY ONE of the inline / artifact
     forms:
 
-    - `graph_a` / `graph_b`: graph dict shaped
-      ``{"nodes": [...], "edges": [{"source", "target", "label"}, ...]}``.
+    - `graph_a` / `graph_b`: graph dict (any accepted shape; edges may use
+      `relation` or the legacy `label` key). The result is always serialised
+      to the canonical ``{"nodes": [{"id", "weight"}], "edges": [{"source",
+      "target", "relation", "weight"}]}`` form.
     - `graph_a_artifact` / `graph_b_artifact`: filename of a session
       artifact whose JSON decodes either to a bare graph dict (above shape)
       or to an object containing a top-level `"graph"` key with the graph
@@ -224,22 +227,26 @@ async def output(
     layout: str = "force",
     relations: list[dict] | None = None,
     relations_artifact: str | None = None,
+    graph: dict | None = None,
+    graph_artifact: str | None = None,
     tool_context: ToolContext = None,
 ) -> dict:
     """Build the final visualization graph and emit the structured response.
 
-    Use this as the LAST step whenever you have classified relations to plot.
-    It converts the `classify_relations` output into the UI graph for you, so
-    you DO NOT hand-write the (potentially long) `graph` yourself — that avoids
-    truncation and schema mistakes.
+    Use this as the LAST step whenever you have something to plot. It builds
+    the canonical UI graph for you, so you DO NOT hand-write the (potentially
+    long) `graph` yourself — that avoids truncation and schema mistakes.
 
-    Provide EXACTLY ONE of `relations` or `relations_artifact`:
+    Provide EXACTLY ONE source for the graph:
 
-    - `relations`: inline list of `{source, target, label}` dicts.
-    - `relations_artifact`: filename of the `classify_relations` session
-      artifact (its summary's `artifact.name`). The before_tool callback loads
-      it and substitutes the relations list before this function runs. Prefer
-      this form — it is the whole point of the tool.
+    - `relations` / `relations_artifact`: classified relations (the
+      `classify_relations` output) as an inline list of `{source, target,
+      label}` dicts, or the artifact filename to inflate. Use this right after
+      `classify_relations`.
+    - `graph` / `graph_artifact`: an already-built graph (e.g. the result of a
+      `graph_operation`) as an inline dict, or the artifact filename to
+      inflate. Use this to finalize a union/intersection result. Any accepted
+      graph shape is normalised to the canonical form.
 
     `message` is the natural-language reply for the chat panel (required, never
     empty). `layout` is "force" (default) or "radial".
@@ -251,19 +258,23 @@ async def output(
     authoritative final answer. After calling this tool, finish via
     `set_model_response` with the same `message` and an EMPTY `graph`.
     """
-    if relations is None:
+    if relations is not None:
+        graph_dict = _build_output_graph(relations)
+    elif graph is not None:
+        graph_dict = Graph.from_dict(graph).to_dict()
+    else:
         return {
             "status": "error",
             "error": (
-                "output: provide `relations` inline or a `relations_artifact` "
-                "filename (the classify_relations artifact) so the "
-                "before_tool_callback can inflate it."
+                "output: provide a graph source — `relations` / "
+                "`relations_artifact` (classify_relations output) OR `graph` / "
+                "`graph_artifact` (a built graph) — so the before_tool_callback "
+                "can inflate the artifact form."
             ),
         }
 
-    graph = _build_output_graph(relations)
     response = AgentResponse.model_validate(
-        {"message": message, "layout": layout, "graph": graph}
+        {"message": message, "layout": layout, "graph": graph_dict}
     )
 
     summary = {
@@ -326,12 +337,14 @@ Your typical workflow:
    finished structured response — so you must NOT load the relations yourself
    or hand-write the graph. This is the standard final step whenever there are
    classified relations to plot.
-5. When the user wants to combine or compare result sets, build graphs of the
-   form {"nodes": [...], "edges": [{"source", "target", "label"}]} and use
+5. When the user wants to combine or compare result sets, use
    `graph_operation` with "union" or "intersection". When you already have
    the graphs as session artifacts (e.g. the outputs of two earlier
    `graph_operation` runs), pass them as `graph_a_artifact` /
-   `graph_b_artifact` instead of inlining the graph dicts.
+   `graph_b_artifact` instead of inlining the graph dicts. To present a
+   `graph_operation` result as the final answer, pass its artifact name to
+   `output` as `graph_artifact` (with your `message`) — do NOT hand-write the
+   graph or re-key it yourself.
 
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.

@@ -2,6 +2,7 @@ from .ner import extract_named_entities
 from .pairs import form_entity_pairs
 from .relations import classify_relations
 from .graph import graph_operation
+from .graph_model import Graph
 from .output import build_output_graph
 
 __all__ = [
@@ -9,5 +10,6 @@ __all__ = [
     "form_entity_pairs",
     "classify_relations",
     "graph_operation",
+    "Graph",
     "build_output_graph",
 ]

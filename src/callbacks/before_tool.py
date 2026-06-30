@@ -21,6 +21,7 @@ _INFLATE_RULES: dict[str, list[tuple[str, str, str, type, str]]] = {
     ],
     "output": [
         ("relations_artifact", "relations", "relation object", list, "relations"),
+        ("graph_artifact", "graph", "graph", dict, "graph"),
     ],
     "graph_operation": [
         ("graph_a_artifact", "graph_a", "graph", dict, "graph"),

@@ -10,6 +10,8 @@ classification (bulk-chain), and graph set operations (union / intersection).
 
 ### ARExplorer UI (chat + d3.js graph)
 
+<img src="docs/ui-demo.png" alt="ARExplorer UI" width="640">
+
 Two-panel web UI — left panel chats with the agent, main panel renders the
 returned attitude graph with d3.js (force / radial layouts). The agent replies
 with a structured `AgentResponse` (`src/schema.py`); the chat shows `message`

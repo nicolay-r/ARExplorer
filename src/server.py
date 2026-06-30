@@ -34,7 +34,7 @@ from google.genai import types  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from src import progress  # noqa: E402
-from src.agent import OUTPUT_ARTIFACT_NAME, root_agent  # noqa: E402
+from src.agent import root_agent  # noqa: E402
 from src.schema import AgentResponse  # noqa: E402
 
 APP_NAME = "arexplorer"

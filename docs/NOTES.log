@@ -21,3 +21,4 @@ NOTES:
             * arexplorer-response: the client-side reply contract (set_model_response / AgentResponse shape, message/graph/layout, when to leave graph empty).
         - Removed all inter-skill cross-references; orchestration lives solely in the base instruction so skills stay self-contained.
         - Rewrote both skill descriptions per good-description guidance: imperative ("Use this skill when..."), user-intent over implementation, pushy about implicit triggers (e.g. even when the user never says "NER"/"sentiment"/"graph"), concise and under the 1024-char spec limit.
+    13. Added document attachments to the UI.

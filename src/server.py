@@ -144,12 +144,9 @@ def _parse_final(text: str) -> AgentResponse:
 def _output_artifact_ref(event) -> dict | None:
     """Return the artifact pointer if this event is an `output` tool response.
 
-    The `output` tool builds the graph deterministically and persists the
-    finished `AgentResponse` as a versioned artifact, returning
-    ``{"artifact": {"name", "version"}}``. We capture that pointer so the
-    server can load the authoritative response for THIS turn's tool call
-    (loading by version keeps it turn-safe — a later conversational turn that
-    doesn't call `output` won't resurrect a stale graph).
+    Each `output` call saves a unique ``output_<call_id>.json`` artifact
+    containing the full `AgentResponse`. The server collects every pointer
+    from the current turn and loads the last one in `_finalize`.
     """
     for resp in event.get_function_responses():
         if resp.name != "output":
@@ -243,16 +240,18 @@ def _ensure_message(response: AgentResponse) -> AgentResponse:
 
 
 async def _finalize(
-    session_id: str, final_text: str, output_ref: dict | None
+    session_id: str, final_text: str, output_refs: list[dict]
 ) -> AgentResponse:
     """Pick the authoritative final response for a turn.
 
     Prefers the graph the `output` tool built (so the model never has to
     hand-write a long graph into `set_model_response`); otherwise falls back to
-    parsing the model's structured final text. The result always carries a
-    non-empty `message` (see `_ensure_message`) so an empty model turn never
-    reaches the UI as a blank bubble.
+    parsing the model's structured final text. When several `output` calls ran
+    this turn, uses the latest ``output_<call_id>.json`` artifact. The result
+    always carries a non-empty `message` (see `_ensure_message`) so an empty
+    model turn never reaches the UI as a blank bubble.
     """
+    output_ref = output_refs[-1] if output_refs else None
     if output_ref is not None:
         built = await _load_output_response(session_id, output_ref)
         if built is not None:
@@ -369,15 +368,17 @@ async def chat(req: ChatRequest) -> dict:
     )
 
     final_text = ""
-    output_ref = None
+    output_refs: list[dict] = []
     async for event in _runner.run_async(
         user_id=APP_NAME, session_id=session_id, new_message=message
     ):
-        output_ref = _output_artifact_ref(event) or output_ref
+        ref = _output_artifact_ref(event)
+        if ref is not None:
+            output_refs.append(ref)
         if event.is_final_response() and event.content and event.content.parts:
             final_text = event.content.parts[0].text or ""
 
-    response = await _finalize(session_id, final_text, output_ref)
+    response = await _finalize(session_id, final_text, output_refs)
     return {"session_id": session_id, "response": response.model_dump()}
 
 
@@ -432,7 +433,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         task = asyncio.create_task(run_agent())
 
         final_text = ""
-        output_ref = None
+        output_refs: list[dict] = []
         try:
             while True:
                 kind, payload = await queue.get()
@@ -442,7 +443,9 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
                     event = payload
                     for line in _event_logs(event):
                         yield _sse({"type": "log", "text": line})
-                    output_ref = _output_artifact_ref(event) or output_ref
+                    ref = _output_artifact_ref(event)
+                    if ref is not None:
+                        output_refs.append(ref)
                     if (
                         event.is_final_response()
                         and event.content
@@ -463,7 +466,7 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
 
-        response = await _finalize(session_id, final_text, output_ref)
+        response = await _finalize(session_id, final_text, output_refs)
         yield _sse(
             {
                 "type": "final",

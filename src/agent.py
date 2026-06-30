@@ -34,11 +34,8 @@ from src.tools import (
 )
 from src.tools.graph_model import Graph
 
-# Canonical session artifact under which the `output` tool stores the finished,
-# schema-validated AgentResponse. The server prefers this (for the matching
-# tool call) over any graph the model hand-writes into set_model_response.
-OUTPUT_ARTIFACT_NAME = "agent_response.json"
-
+# Each `output` call saves a unique ``output_<call_id>.json`` artifact holding
+# the finished AgentResponse. The server delivers the latest one from the turn.
 
 # The `*_artifact` parameters live ONLY on these wrappers (not on the underlying
 # `src.tools.*` functions) because that is what ADK 2.0 turns into the LLM-facing
@@ -255,11 +252,11 @@ async def output(
     empty). `layout` is "force" (default) or "radial".
 
     Returns a small summary (`status`, `node_count`, `edge_count`, and an
-    `artifact` pointer). The full, schema-validated `AgentResponse` (your
-    `message` + the built `graph` + `layout`) is saved as the
-    ``agent_response.json`` session artifact, which the server uses as the
-    authoritative final answer. After calling this tool, finish via
-    `set_model_response` with the same `message` and an EMPTY `graph`.
+    `artifact` pointer to a unique ``output_<call_id>.json`` file). The full,
+    schema-validated `AgentResponse` is saved in that artifact; the server
+    delivers the latest one from the turn as the authoritative final answer.
+    After calling this tool, finish via `set_model_response` with the same
+    `message` and an EMPTY `graph`.
     """
     if relations is not None:
         graph_dict = _build_output_graph(relations)
@@ -296,11 +293,11 @@ async def output(
             )
         )
         try:
-            version = await tool_context.save_artifact(
-                OUTPUT_ARTIFACT_NAME, part
-            )
+            call_id = tool_context.function_call_id or "unknown"
+            artifact_name = f"output_{call_id}.json"
+            version = await tool_context.save_artifact(artifact_name, part)
             summary["artifact"] = {
-                "name": OUTPUT_ARTIFACT_NAME,
+                "name": artifact_name,
                 "version": version,
             }
         except ValueError as exc:

@@ -43,6 +43,17 @@ def _decode_artifact(part: genai_types.Part) -> object:
     return json.loads(text)
 
 
+def _parse_artifact_ref(artifact_name: str) -> tuple[str, int | None]:
+    """Split ``filename@version`` into (filename, version) for pinned loads."""
+    if "@" not in artifact_name:
+        return artifact_name, None
+    base, ver = artifact_name.rsplit("@", 1)
+    try:
+        return base, int(ver)
+    except ValueError:
+        return artifact_name, None
+
+
 async def inflate_artifact_inputs(
     *,
     tool: BaseTool,
@@ -88,8 +99,10 @@ async def inflate_artifact_inputs(
         if not artifact_name:
             continue
 
+        filename, version = _parse_artifact_ref(artifact_name)
+
         try:
-            part = await tool_context.load_artifact(artifact_name)
+            part = await tool_context.load_artifact(filename, version=version)
         except ValueError as exc:
             return {
                 "status": "error",
@@ -102,7 +115,11 @@ async def inflate_artifact_inputs(
         if part is None:
             return {
                 "status": "error",
-                "error": f"Artifact {artifact_name!r} not found in session.",
+                "error": (
+                    f"Artifact {artifact_name!r} not found in session"
+                    + (f" (version {version})" if version is not None else "")
+                    + "."
+                ),
             }
 
         try:

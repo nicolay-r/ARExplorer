@@ -40,13 +40,19 @@ Typical pipeline for turning raw documents into an attitude/relation graph.
    or hand-write the graph. This is the standard final step whenever there are
    classified relations to plot.
 5. When the user wants to combine or compare result sets, use
-   `graph_operation` with "union" or "intersection". When you already have
-   the graphs as session artifacts (e.g. the outputs of two earlier
-   `graph_operation` runs), pass them as `graph_a_artifact` /
-   `graph_b_artifact` instead of inlining the graph dicts. To present a
-   `graph_operation` result as the final answer, pass its artifact name to
-   `output` as `graph_artifact` (with your `message`) — do NOT hand-write the
-   graph or re-key it yourself.
+   `graph_operation` with "union" or "intersection". Pass the two graphs as
+   `graph_a_artifact` / `graph_b_artifact` — do NOT call `load_artifacts`
+   for this; the before_tool callback inflates the artifacts for you.
+
+   **Which artifact names to use:** each successful `output` call returns an
+   `artifact` pointer to a unique file (``output_<call_id>.json``). Pass two
+   such filenames — one from each earlier analysis — as `graph_a_artifact` and
+   `graph_b_artifact`. You can also use a `graph_operation_<call_id>.json`
+   artifact from a prior `graph_operation` run.
+
+   Then present the merged graph: `output(graph_artifact=<graph_operation
+   artifact name>, message=...)`. Call `output` **once** with the union
+   result — do not re-run `output` on the individual source graphs afterward.
 
 Be transparent about tool errors and ask for missing inputs (e.g. text context
 for a relation) rather than guessing.
@@ -90,8 +96,11 @@ for a relation) rather than guessing.
   which is exactly the shape the previous tool's artifact already has).
 - For `graph_operation` the artifact must JSON-decode to a graph dict
   ({"nodes": [...], "edges": [...]}) or to an object with a `"graph"` key
-  containing such a dict — exactly what an earlier `graph_operation` call
-  has already written.
+  containing such a dict — exactly what an earlier `graph_operation` or
+  `output` artifact already contains (`output_<id>.json` stores the full
+  `AgentResponse`, whose `graph` field is unwrapped automatically).
+- Artifact names may include a version pin: `filename@3` loads version 3
+  instead of the latest.
 - The framework loads the artifact and substitutes its content for the
   inline value before the tool runs. Prefer the artifact form whenever the
   input is large or already lives in the session (e.g. uploaded by the

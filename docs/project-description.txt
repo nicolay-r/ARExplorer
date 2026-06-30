@@ -69,6 +69,7 @@ LIMITATION:
     3. Graph is offloaded from the context window only.
         - The graph storage and corresponding operations with grapsh assume that the whole graph (graphs) are stored in memory.
         - This could be further on improved to prevent OOM exceptions.
+    4. Supported texts in english by default. Limited by the NER model actually.
 
 EVALUATION:
     NER: refer to particular model

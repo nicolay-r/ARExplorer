@@ -37,11 +37,33 @@
         .thinking-bar.indeterminate > span { width: 40%; animation: thinking-slide 1s linear infinite; }
         @keyframes thinking-slide { from { margin-left: -40%; } to { margin-left: 100%; } }
         #composer { display: flex; flex-direction: column; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
-        #composer_row { display: flex; gap: 8px; align-items: flex-end; }
-        #composer textarea { flex: 1; resize: none; height: 46px; padding: 8px; border: 1px solid #cbd2d9; border-radius: 8px; font: inherit; }
-        #send { padding: 0 16px; height: 46px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
-        #send:disabled { background: #9aa5b1; cursor: not-allowed; }
-        #attach_btn { width: 46px; height: 46px; flex: 0 0 auto; border: 1px solid #cbd2d9; border-radius: 8px; background: #fff; color: #52606d; font-size: 18px; cursor: pointer; }
+        /* Cursor-style input: a single rounded box that holds the textarea with
+           the attach/send controls tucked inside along the bottom edge. */
+        #input_box {
+            display: flex; flex-direction: column; gap: 4px;
+            border: 1px solid #cbd2d9; border-radius: 12px; background: #fff;
+            padding: 8px 8px 6px; transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        }
+        #input_box:focus-within { border-color: #2850b4; box-shadow: 0 0 0 3px rgba(40, 80, 180, 0.12); }
+        #composer textarea {
+            width: 100%; resize: none; border: 0; outline: 0; background: transparent;
+            font: inherit; line-height: 1.45; padding: 2px 4px;
+            min-height: 60px; max-height: 220px; overflow-y: auto;
+        }
+        #input_actions { display: flex; align-items: center; gap: 6px; }
+        #send {
+            margin-left: auto; width: 32px; height: 32px; flex: 0 0 auto;
+            border: 0; border-radius: 8px; background: #2850b4; color: #fff;
+            font-size: 17px; font-weight: 600; cursor: pointer; line-height: 1;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        #send:hover { background: #1f4099; }
+        #send:disabled { background: #c2cad3; cursor: not-allowed; }
+        #attach_btn {
+            width: 32px; height: 32px; flex: 0 0 auto; border: 0; border-radius: 8px;
+            background: transparent; color: #52606d; font-size: 17px; cursor: pointer;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
         #attach_btn:hover { background: #eef1f5; }
         #attach_btn:disabled { color: #b6c0cc; cursor: not-allowed; }
         #attachments { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -80,10 +102,12 @@
     <div id="messages"></div>
     <div id="composer">
         <div id="attachments"></div>
-        <div id="composer_row">
-            <button id="attach_btn" type="button" title="Attach .txt documents">&#128206;</button>
-            <textarea id="prompt" placeholder="e.g. Extract entities and their attitudes from: …  (or attach .txt files)"></textarea>
-            <button id="send">Send</button>
+        <div id="input_box">
+            <textarea id="prompt" rows="1" placeholder="e.g. Extract entities and their attitudes from: …  (or attach .txt files)"></textarea>
+            <div id="input_actions">
+                <button id="attach_btn" type="button" title="Attach .txt documents" aria-label="Attach .txt documents">&#128206;</button>
+                <button id="send" type="button" title="Send" aria-label="Send">&#8593;</button>
+            </div>
         </div>
         <input type="file" id="file_input" accept=".txt,text/plain" multiple hidden>
     </div>
@@ -279,6 +303,7 @@
         const documents = attachments.slice();
         if (!text && documents.length === 0) return;
         promptEl.value = "";
+        autoGrow();
         sendBtn.disabled = true;
         attachBtn.disabled = true;
 
@@ -362,6 +387,13 @@
             promptEl.focus();
         }
     }
+
+    // Grow the textarea with its content (up to the CSS max-height), Cursor-style.
+    function autoGrow() {
+        promptEl.style.height = "auto";
+        promptEl.style.height = Math.min(promptEl.scrollHeight, 220) + "px";
+    }
+    promptEl.addEventListener("input", autoGrow);
 
     sendBtn.addEventListener("click", send);
     promptEl.addEventListener("keydown", e => {

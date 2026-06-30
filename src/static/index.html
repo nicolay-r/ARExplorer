@@ -32,6 +32,8 @@
         .thinking-log li::before { content: "›"; position: absolute; left: 2px; color: #9aa5b1; }
         .thinking-log li.active { color: #2850b4; }
         .thinking-log li.active::before { content: "▸"; color: #2850b4; }
+        .thinking-log li.done { color: #52606d; }
+        .thinking-log li.done::before { content: "✓"; color: #2f9e44; }
         .thinking-bar { margin-top: 4px; height: 4px; border-radius: 2px; background: #e1e5ea; overflow: hidden; }
         .thinking-bar > span { display: block; height: 100%; width: 0; background: #2850b4; transition: width 0.2s ease; }
         .thinking-bar.indeterminate > span { width: 40%; animation: thinking-slide 1s linear infinite; }
@@ -234,15 +236,62 @@
             return li;
         }
 
+        // The label used to pair a tool's "→ result" completion with the step
+        // its call started: strip the trailing ellipsis and any "(args)" tail.
+        function baseLabel(text) {
+            let s = text.replace(/…+$/, "");
+            const paren = s.indexOf(" (");
+            if (paren !== -1) s = s.slice(0, paren);
+            return s.trim();
+        }
+
+        function appendStep(text) {
+            const prev = log.querySelector("li.active");
+            if (prev) prev.classList.remove("active");
+            const li = document.createElement("li");
+            li.className = "active";
+            li.dataset.label = baseLabel(text);
+            li.textContent = text;
+            log.appendChild(li);
+            return li;
+        }
+
+        // Fold a completion into its step: drop the redundant "done" word and any
+        // progress bar, keep the label, and append whatever detail came back.
+        function markStepDone(li, result) {
+            const detail = (result || "").replace(/^done\b\s*—?\s*/, "").trim();
+            li.classList.remove("active");
+            li.classList.add("done");
+            li.dataset.done = "1";
+            li.textContent = detail ? `${li.dataset.label} — ${detail}` : li.dataset.label;
+        }
+
         return {
             element: div,
             addLog(text) {
-                const prev = log.querySelector("li.active");
-                if (prev) prev.classList.remove("active");
-                const li = document.createElement("li");
-                li.className = "active";
-                li.textContent = text;
-                log.appendChild(li);
+                // A "<label> → <result>" line completes an earlier step: update it
+                // in place (marking it done) rather than adding a separate step.
+                const sep = text.indexOf(" → ");
+                if (sep !== -1) {
+                    const label = text.slice(0, sep).trim();
+                    const result = text.slice(sep + 3).trim();
+                    const items = log.querySelectorAll("li");
+                    for (let i = items.length - 1; i >= 0; i--) {
+                        const li = items[i];
+                        if (li.dataset.done) continue;
+                        if (li.dataset.label && label.startsWith(li.dataset.label)) {
+                            markStepDone(li, result);
+                            messagesEl.scrollTop = messagesEl.scrollHeight;
+                            return;
+                        }
+                    }
+                    // No matching pending step (e.g. a result without a logged
+                    // call): show it as its own already-done line.
+                    markStepDone(appendStep(label), result);
+                    messagesEl.scrollTop = messagesEl.scrollHeight;
+                    return;
+                }
+                appendStep(text);
                 messagesEl.scrollTop = messagesEl.scrollHeight;
             },
             // Update the current step with a live progress counter + bar.

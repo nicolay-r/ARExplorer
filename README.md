@@ -28,3 +28,19 @@ For low-level agent debugging:
 ```bash
 adk web --port 2000 ./src/
 ```
+## Deployment
+
+Using docker-compose:
+
+```bash
+cd .recepie/arexplorer-demo
+docker compose up --build
+```
+
+Then open http://127.0.0.1:2000/ (Compose maps host port `2000` → container
+`8000`). Stop and remove the container with:
+
+```bash
+docker compose down
+```
+

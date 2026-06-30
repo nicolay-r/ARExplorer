@@ -10,10 +10,13 @@ ADK 2.0 root agent exposing four tools (wrapped over their Python APIs):
 import asyncio
 import json
 import os
+import pathlib
 
 from google.adk.agents import Agent
 from google.adk.models import Gemini
+from google.adk.skills import load_skill_from_dir
 from google.adk.tools import ToolContext
+from google.adk.tools import skill_toolset
 from google.adk.tools.load_artifacts_tool import load_artifacts_tool
 from google.genai import types
 
@@ -309,109 +312,40 @@ async def output(
     return summary
 
 
+# All task-specific behavior (the tool chain, artifact offloading/inflation, and
+# how the final response is assembled) lives in ADK skills that the agent loads
+# on demand. This keeps the base instruction task-agnostic: it states only the
+# agent identity, a skill-first working style, and the always-on structured
+# output contract — the loaded skill supplies everything else.
 INSTRUCTION = """\
-You are ARExplorer, an assistant that extracts and explores Attitudes and
-Relations between named entities found in documents.
+You are ARExplorer. You accomplish user requests by discovering and using the
+specialized skills available to you, rather than improvising behavior that a
+skill already documents.
 
-Your typical workflow:
-1. Use `extract_named_entities` to annotate named entities across the provided
-   texts. This handles large volumes by chunking, so prefer it over reasoning
-   about entities yourself.
-2. Use `form_entity_pairs` to turn the NER output into candidate
-   `{text, source, target}` triples. Pass the NER artifact name as
-   `documents_artifact` — you do NOT need to load the NER artifact yourself
-   first. Each pair's `text` is a SMALL LOCAL WINDOW around the two entities
-   (not the full source text); pairs whose entities are more than
-   `window_size` words apart (default 5) are dropped. The tool also caps
-   the output at `max_pairs` (default 50) — keeping the closest-gap pairs
-   first — so downstream relation classification stays cheap. Tune
-   `window_size` / `context_pad` / `max_pairs` only when the user
-   explicitly asks. Optionally filter by NER class via `entity_types`.
-3. Use `classify_relations` to determine the attitude (positive, negative, or
-   neutral) that each source entity expresses towards the target entity. Pass
-   the pairs artifact name as `pairs_artifact` from the previous step.
-4. Use `output` to turn the `classify_relations` result into the final
-   visualization. Pass the classify_relations artifact name as
-   `relations_artifact` plus your `message` and `layout`. The tool builds the
-   graph (nodes + edges) deterministically from the artifact and saves the
-   finished structured response — so you must NOT load the relations yourself
-   or hand-write the graph. This is the standard final step whenever there are
-   classified relations to plot.
-5. When the user wants to combine or compare result sets, use
-   `graph_operation` with "union" or "intersection". When you already have
-   the graphs as session artifacts (e.g. the outputs of two earlier
-   `graph_operation` runs), pass them as `graph_a_artifact` /
-   `graph_b_artifact` instead of inlining the graph dicts. To present a
-   `graph_operation` result as the final answer, pass its artifact name to
-   `output` as `graph_artifact` (with your `message`) — do NOT hand-write the
-   graph or re-key it yourself.
+When a request matches one of your available skills, FIRST load that skill with
+`load_skill` and follow its instructions exactly before acting or replying. Use
+`list_skills` if you are unsure which skill applies. Prefer the tools and
+procedures a skill documents over reasoning the result out yourself.
 
-Be transparent about tool errors and ask for missing inputs (e.g. text context
-for a relation) rather than guessing.
+Be transparent about tool errors and ask for missing inputs rather than
+guessing.
 
-TOOL OUTPUTS ARE OFFLOADED TO ARTIFACTS:
-- `extract_named_entities`, `form_entity_pairs`, `classify_relations`, and
-  `graph_operation` do NOT return their raw data to you. Each successful call
-  returns only:
-    * `status`, lightweight counts (e.g. `document_count` / `entity_count`,
-      `pair_count`, `relation_count` / `label_counts`,
-      `node_count` / `edge_count`), and
-    * an `artifact` field of shape {"name": "<file>.json", "version": <int>}.
-  The full `documents` / `pairs` / `relations` / `graph` payload is saved as
-  a JSON artifact in the session artifact store.
-- To read the actual data (look up labels, populate the final graph), call
-  the `load_artifacts` tool with the artifact name, e.g.
-  `load_artifacts(artifact_names=["classify_relations_<id>.json"])`. The
-  JSON content of each requested artifact is then injected into your next
-  turn so you can reason over it.
-- Only call `load_artifacts` when you genuinely need the content of an
-  artifact; the counts alone are usually enough to decide what to do next.
-  In particular, chaining NER -> pairs -> relations does NOT require any
-  `load_artifacts` call — each step accepts the previous step's artifact
-  name as a `*_artifact` argument.
-
-TOOL INPUTS CAN ALSO COME FROM ARTIFACTS:
-- `extract_named_entities` accepts `texts_artifact` instead of `texts`.
-- `form_entity_pairs` accepts `documents_artifact` instead of `documents`.
-- `classify_relations` accepts `pairs_artifact` instead of `pairs`.
-- `output` accepts `relations_artifact` instead of `relations` — pass the
-  `classify_relations` artifact name here.
-- `graph_operation` accepts `graph_a_artifact` / `graph_b_artifact`
-  instead of `graph_a` / `graph_b` (you may mix forms across the two
-  inputs).
-- For list-shaped tools the artifact must JSON-decode to a list of the
-  expected shape (strings for texts, {text, entities} dicts for documents,
-  {text, source, target} dicts for pairs) or to an object with a matching
-  key (`{"texts": [...]}` / `{"documents": [...]}` / `{"pairs": [...]}` —
-  which is exactly the shape the previous tool's artifact already has).
-- For `graph_operation` the artifact must JSON-decode to a graph dict
-  ({"nodes": [...], "edges": [...]}) or to an object with a `"graph"` key
-  containing such a dict — exactly what an earlier `graph_operation` call
-  has already written.
-- The framework loads the artifact and substitutes its content for the
-  inline value before the tool runs. Prefer the artifact form whenever the
-  input is large or already lives in the session (e.g. uploaded by the
-  user, or written by an earlier turn). Provide exactly one of the inline
-  or artifact form per input.
-
-OUTPUT FORMAT (important):
-- Always deliver your final answer through the `set_model_response` tool, in the
-  structured `AgentResponse` format. Never reply with plain free-form text.
-- When there are classified relations to plot, the graph is produced by the
-  `output` tool (see workflow step 4), NOT by you. In that case call `output`
-  first, then call `set_model_response` with your `message` and `layout` and an
-  EMPTY `graph` — the server uses the graph that `output` built. Do NOT
-  hand-write graph nodes/edges yourself; that output can be long and is
-  error-prone.
-- `message`: a clear natural-language reply for the chat panel. Summarize what
-  was found and how to read the graph.
-- `graph`: leave EMPTY when you used `output`. Only populate it directly for a
-  graph you assembled yourself without `output` (e.g. the result of a
-  `graph_operation`), using `nodes` ({id, weight}) and `edges` ({source,
-  target, relation in "positive"/"negative"/"neutral", weight}). Leave empty
-  when there is genuinely nothing to plot.
-- `layout`: "radial" for many entities with a clear hierarchy, otherwise "force".
+Always deliver your final answer through the `set_model_response` tool in the
+structured response format defined by your output schema; never reply with plain
+free-form text. The loaded skill explains how to populate that response.
 """
+
+_SKILLS_DIR = pathlib.Path(__file__).parent / "skills"
+
+# Two complementary skills, kept separate so each concern can evolve on its own:
+#   - arexplorer-workflow: the tool pipeline that produces the data / graph.
+#   - arexplorer-response: the client-side contract for delivering the final reply.
+workflow_skill = load_skill_from_dir(_SKILLS_DIR / "arexplorer-workflow")
+response_skill = load_skill_from_dir(_SKILLS_DIR / "arexplorer-response")
+
+skills_toolset = skill_toolset.SkillToolset(
+    skills=[workflow_skill, response_skill]
+)
 
 root_agent = Agent(
     name="arexplorer_agent",
@@ -428,6 +362,7 @@ root_agent = Agent(
         graph_operation,
         output,
         load_artifacts_tool,
+        skills_toolset,
     ],
     before_tool_callback=inflate_artifact_inputs,
     after_tool_callback=offload_tool_output,

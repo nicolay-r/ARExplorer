@@ -14,3 +14,10 @@ NOTES:
         - Added a progress bar to the UI.
         - Fixed "Event loop is closed" on the 2nd+ classify_relations call. Root cause: `_get_llm` was @lru_cache'd, so the bulk-chain provider adapter (and its lazily-created httpx.AsyncClient) was reused across calls; that async client binds to the event loop that first drives it, but each run uses its own short-lived loop (see `_run_in_isolated_loop`) which is closed afterwards — so the cached client referenced a dead loop on the next run.
     11. Simplified the classify_relations prompt schema from a 2-step CoT (reasoning -> label) to a single label-only prompt (halves LLM calls per pair).
+    12. Moved the agent's giant inline INSTRUCTION into ADK 2.0 Skills (SkillToolset + load_skill_from_dir, ADK 2.3.0 in .venv/py3.10) so the heavy workflow text stays out of the base context window until needed (L1 description always in context, L2 body loaded on demand via the load_skill tool).
+        - Base instruction is now task-agnostic: only agent identity, a skill-first working style (discover via list_skills, load via load_skill, prefer documented tools), and the always-on structured-output contract (set_model_response) — no NER/graph/layout specifics. Dropped from ~5KB to ~800 chars.
+        - Split the workflow into two non-intersecting skills under src/skills/ (each its own dir; dir name must match frontmatter name):
+            * arexplorer-workflow: the tool pipeline + artifact offload/inflate mechanics (produces the data/graph).
+            * arexplorer-response: the client-side reply contract (set_model_response / AgentResponse shape, message/graph/layout, when to leave graph empty).
+        - Removed all inter-skill cross-references; orchestration lives solely in the base instruction so skills stay self-contained.
+        - Rewrote both skill descriptions per good-description guidance: imperative ("Use this skill when..."), user-intent over implementation, pushy about implicit triggers (e.g. even when the user never says "NER"/"sentiment"/"graph"), concise and under the 1024-char spec limit.

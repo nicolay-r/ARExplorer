@@ -40,6 +40,11 @@ from src.schema import AgentResponse  # noqa: E402
 APP_NAME = "arexplorer"
 STATIC_DIR = Path(__file__).parent / "static"
 
+# Session artifact under which user-attached .txt documents are stored, in the
+# `{"texts": [...]}` shape that `extract_named_entities` accepts via its
+# `texts_artifact` input (inflated by the before_tool callback).
+UPLOAD_ARTIFACT_NAME = "uploaded_texts.json"
+
 app = FastAPI(title="ARExplorer UI")
 
 _session_service = InMemorySessionService()
@@ -52,9 +57,15 @@ _runner = Runner(
 )
 
 
+class UploadedDocument(BaseModel):
+    name: str | None = None
+    text: str
+
+
 class ChatRequest(BaseModel):
-    message: str
+    message: str = ""
     session_id: str | None = None
+    documents: list[UploadedDocument] | None = None
 
 
 async def _ensure_session(session_id: str) -> None:
@@ -65,6 +76,54 @@ async def _ensure_session(session_id: str) -> None:
         await _session_service.create_session(
             app_name=APP_NAME, user_id=APP_NAME, session_id=session_id
         )
+
+
+async def _save_uploaded_documents(
+    session_id: str, documents: list[UploadedDocument] | None
+) -> dict | None:
+    """Persist user-attached .txt documents as a session artifact.
+
+    Stores the non-empty document texts under ``uploaded_texts.json`` in the
+    ``{"texts": [...]}`` shape the agent's ``texts_artifact`` input expects, so
+    `extract_named_entities` can consume them without the text ever passing
+    through the prompt. Returns a small pointer (name/version/count) used to tell
+    the agent the artifact is available, or ``None`` when there is nothing to
+    save.
+    """
+    texts = [doc.text for doc in (documents or []) if doc.text and doc.text.strip()]
+    if not texts:
+        return None
+
+    payload = json.dumps({"texts": texts}, ensure_ascii=False).encode("utf-8")
+    part = types.Part(
+        inline_data=types.Blob(mime_type="application/json", data=payload)
+    )
+    version = await _artifact_service.save_artifact(
+        app_name=APP_NAME,
+        user_id=APP_NAME,
+        session_id=session_id,
+        filename=UPLOAD_ARTIFACT_NAME,
+        artifact=part,
+    )
+    return {"name": UPLOAD_ARTIFACT_NAME, "version": version, "count": len(texts)}
+
+
+def _compose_message(text: str, upload: dict | None) -> str:
+    """Combine the typed prompt with a note about any attached documents."""
+    text = (text or "").strip()
+    if not upload:
+        return text
+
+    note = (
+        f'The user attached {upload["count"]} text document(s), saved as the '
+        f'session artifact "{upload["name"]}" — a JSON object of shape '
+        '{"texts": [...]} with one entry per document. Pass '
+        f'"{upload["name"]}" as `texts_artifact` to tools that accept it '
+        "(e.g. extract_named_entities) instead of inlining the text."
+    )
+    if not text:
+        text = "Analyze the attached document(s)."
+    return f"{text}\n\n{note}"
 
 
 def _parse_final(text: str) -> AgentResponse:
@@ -302,8 +361,12 @@ def _event_logs(event) -> list[str]:
 async def chat(req: ChatRequest) -> dict:
     session_id = req.session_id or uuid.uuid4().hex
     await _ensure_session(session_id)
+    upload = await _save_uploaded_documents(session_id, req.documents)
 
-    message = types.Content(role="user", parts=[types.Part.from_text(text=req.message)])
+    message = types.Content(
+        role="user",
+        parts=[types.Part.from_text(text=_compose_message(req.message, upload))],
+    )
 
     final_text = ""
     output_ref = None
@@ -339,8 +402,10 @@ async def chat_stream(req: ChatRequest) -> StreamingResponse:
         await _ensure_session(session_id)
         yield _sse({"type": "session", "session_id": session_id})
 
+        upload = await _save_uploaded_documents(session_id, req.documents)
         message = types.Content(
-            role="user", parts=[types.Part.from_text(text=req.message)]
+            role="user",
+            parts=[types.Part.from_text(text=_compose_message(req.message, upload))],
         )
 
         loop = asyncio.get_running_loop()

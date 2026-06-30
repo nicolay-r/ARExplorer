@@ -32,10 +32,20 @@
         .thinking-bar > span { display: block; height: 100%; width: 0; background: #2850b4; transition: width 0.2s ease; }
         .thinking-bar.indeterminate > span { width: 40%; animation: thinking-slide 1s linear infinite; }
         @keyframes thinking-slide { from { margin-left: -40%; } to { margin-left: 100%; } }
-        #composer { display: flex; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
+        #composer { display: flex; flex-direction: column; padding: 10px; border-top: 1px solid #e1e5ea; gap: 8px; }
+        #composer_row { display: flex; gap: 8px; align-items: flex-end; }
         #composer textarea { flex: 1; resize: none; height: 46px; padding: 8px; border: 1px solid #cbd2d9; border-radius: 8px; font: inherit; }
-        #composer button { padding: 0 16px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
-        #composer button:disabled { background: #9aa5b1; cursor: not-allowed; }
+        #send { padding: 0 16px; height: 46px; border: 0; border-radius: 8px; background: #2850b4; color: #fff; font-weight: 600; cursor: pointer; }
+        #send:disabled { background: #9aa5b1; cursor: not-allowed; }
+        #attach_btn { width: 46px; height: 46px; flex: 0 0 auto; border: 1px solid #cbd2d9; border-radius: 8px; background: #fff; color: #52606d; font-size: 18px; cursor: pointer; }
+        #attach_btn:hover { background: #eef1f5; }
+        #attach_btn:disabled { color: #b6c0cc; cursor: not-allowed; }
+        #attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+        #attachments:empty { display: none; }
+        .chip { display: inline-flex; align-items: center; gap: 6px; background: #eef1f5; border: 1px solid #d3d9e0; border-radius: 14px; padding: 3px 6px 3px 10px; font-size: 12px; color: #3e4c59; }
+        .chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+        .chip button { background: none; border: 0; color: #7b8794; cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; }
+        .chip button:hover { color: #b42323; }
 
         /* Main panel: visualization */
         #vis_panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -65,8 +75,13 @@
     </div>
     <div id="messages"></div>
     <div id="composer">
-        <textarea id="prompt" placeholder="e.g. Extract entities and their attitudes from: ..."></textarea>
-        <button id="send">Send</button>
+        <div id="attachments"></div>
+        <div id="composer_row">
+            <button id="attach_btn" type="button" title="Attach .txt documents">&#128206;</button>
+            <textarea id="prompt" placeholder="e.g. Extract entities and their attitudes from: …  (or attach .txt files)"></textarea>
+            <button id="send">Send</button>
+        </div>
+        <input type="file" id="file_input" accept=".txt,text/plain" multiple hidden>
     </div>
 </div>
 
@@ -111,6 +126,52 @@
     const messagesEl = document.getElementById("messages");
     const promptEl = document.getElementById("prompt");
     const sendBtn = document.getElementById("send");
+    const attachBtn = document.getElementById("attach_btn");
+    const fileInput = document.getElementById("file_input");
+    const attachmentsEl = document.getElementById("attachments");
+
+    //////////////////////////////////////////////////////////////////////////
+    // Attachments (.txt documents sent to the agent as a session artifact)
+    //////////////////////////////////////////////////////////////////////////
+    let attachments = []; // [{ name, text }]
+
+    function renderAttachments() {
+        attachmentsEl.innerHTML = "";
+        attachments.forEach((att, idx) => {
+            const chip = document.createElement("div");
+            chip.className = "chip";
+            const name = document.createElement("span");
+            name.className = "chip-name";
+            name.textContent = att.name;
+            name.title = att.name;
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.title = "Remove";
+            remove.innerHTML = "&times;";
+            remove.addEventListener("click", () => {
+                attachments.splice(idx, 1);
+                renderAttachments();
+            });
+            chip.appendChild(name);
+            chip.appendChild(remove);
+            attachmentsEl.appendChild(chip);
+        });
+    }
+
+    attachBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+        const files = Array.from(fileInput.files || []);
+        for (const file of files) {
+            try {
+                const text = await file.text();
+                attachments.push({ name: file.name, text });
+            } catch (err) {
+                addMessage(`Could not read ${file.name}: ${err.message}`, "error");
+            }
+        }
+        fileInput.value = ""; // allow re-selecting the same file later
+        renderAttachments();
+    });
 
     function addMessage(text, kind) {
         const div = document.createElement("div");
@@ -191,17 +252,28 @@
 
     async function send() {
         const text = promptEl.value.trim();
-        if (!text) return;
+        const documents = attachments.slice();
+        if (!text && documents.length === 0) return;
         promptEl.value = "";
         sendBtn.disabled = true;
-        addMessage(text, "user");
+        attachBtn.disabled = true;
+
+        let bubble = text;
+        if (documents.length) {
+            const names = documents.map(d => d.name).join(", ");
+            const tag = `\uD83D\uDCCE ${documents.length} file(s): ${names}`;
+            bubble = text ? `${text}\n\n${tag}` : tag;
+        }
+        addMessage(bubble, "user");
+        attachments = [];
+        renderAttachments();
         const thinking = addThinking();
 
         try {
             const res = await fetch("/api/chat/stream", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: text, session_id: sessionId })
+                body: JSON.stringify({ message: text, session_id: sessionId, documents })
             });
             if (!res.ok || !res.body) throw new Error("HTTP " + res.status);
 
@@ -262,6 +334,7 @@
             addMessage("Request failed: " + err.message, "error");
         } finally {
             sendBtn.disabled = false;
+            attachBtn.disabled = false;
             promptEl.focus();
         }
     }

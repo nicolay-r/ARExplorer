@@ -23,6 +23,10 @@
         .msg.error { background: #fde8e6; color: #b42323; border: 1px solid #f4c7c3; }
         .msg.thinking { color: #7b8794; font-style: italic; }
         .thinking-head { font-weight: 600; font-style: normal; color: #52606d; }
+        .thinking.collapsible .thinking-head { cursor: pointer; display: flex; align-items: center; gap: 6px; user-select: none; }
+        .thinking-chevron { display: inline-block; font-size: 10px; color: #9aa5b1; transition: transform 0.15s ease; }
+        .thinking.collapsed .thinking-chevron { transform: rotate(-90deg); }
+        .thinking.collapsed .thinking-log { display: none; }
         .thinking-log { list-style: none; margin: 6px 0 0; padding: 0; font-style: normal; font-size: 12px; }
         .thinking-log li { padding: 2px 0 2px 16px; position: relative; color: #7b8794; }
         .thinking-log li::before { content: "›"; position: absolute; left: 2px; color: #9aa5b1; }
@@ -241,10 +245,30 @@
                 bar.firstChild.style.width = hasTotal ? pct + "%" : "";
                 messagesEl.scrollTop = messagesEl.scrollHeight;
             },
-            done() {
+            // Fold the bubble into a single clickable line; the log stays in the
+            // DOM so it can be unfolded later via the chevron. Drops the bubble
+            // entirely when there were no steps to show.
+            collapse(verb = "Done") {
                 const active = log.querySelector("li.active");
                 if (active) active.classList.remove("active");
-                head.textContent = "done";
+                log.querySelectorAll(".thinking-bar").forEach(
+                    bar => bar.classList.remove("indeterminate")
+                );
+
+                const count = log.querySelectorAll("li").length;
+                if (count === 0) { div.remove(); return; }
+
+                div.classList.add("collapsible", "collapsed");
+                head.textContent = "";
+                const chevron = document.createElement("span");
+                chevron.className = "thinking-chevron";
+                chevron.innerHTML = "&#9662;"; // ▾
+                const label = document.createElement("span");
+                label.textContent =
+                    `${verb} · ${count} step${count === 1 ? "" : "s"}`;
+                head.appendChild(chevron);
+                head.appendChild(label);
+                head.onclick = () => div.classList.toggle("collapsed");
             },
             remove() { div.remove(); }
         };
@@ -318,7 +342,7 @@
 
             if (streamError) throw new Error(streamError);
 
-            thinking.remove();
+            thinking.collapse();
             const response = finalResponse || {};
             addMessage(response.message || "(no message)", "agent");
 
@@ -330,7 +354,7 @@
                 render();
             }
         } catch (err) {
-            thinking.remove();
+            thinking.collapse("Stopped");
             addMessage("Request failed: " + err.message, "error");
         } finally {
             sendBtn.disabled = false;

@@ -1,0 +1,38 @@
+# ARExplorer demo image — serves src/server.py (FastAPI + d3.js UI) with the
+# spaCy NER provider and the Replicate LLM relation provider baked in.
+#
+# Build context is the repository ROOT (see docker-compose.yml) so this can
+# COPY both the application source (`src/`, `requirements.txt`) and the demo
+# providers under `.recepie/arexplorer-demo/providers/`.
+FROM python:3.11-slim
+
+# - build-essential: lets pip build any source-only wheels (spaCy deps, etc.)
+# - curl: handy for container healthchecks / debugging
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY requirements.txt ./requirements.txt
+COPY .recepie/arexplorer-demo/providers/requirements.txt ./providers-requirements.txt
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt -r providers-requirements.txt
+
+# Pre-download the spaCy model the NER provider (SpacyNER) expects, so the
+# first request doesn't pay the download cost (and works without net access).
+RUN python -m spacy download en_core_web_sm
+
+# Application code and the demo providers loaded dynamically at runtime.
+COPY src ./src
+COPY .recepie/arexplorer-demo/providers ./providers
+
+COPY .recepie/arexplorer-demo/.en[v] ./.env
+
+EXPOSE 8000
+
+CMD ["uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,37 @@
+# ARExplorer demo — build & run the FastAPI server (src/server.py) with the
+# spaCy + Replicate providers baked into the image.
+#
+#   cd .recepie/arexplorer-demo
+#   docker compose up --build
+#   open http://127.0.0.1:8000/
+#
+# Secrets (GOOGLE_API_KEY, REPLICATE_API_TOKEN) are read from the repo-root
+# .env via env_file. The provider path settings in that .env (NER_*/RELATION_*
+# pointing at test/providers) are intentionally overridden below to use the
+# providers baked into the image at /app/providers.
+services:
+  arexplorer:
+    build:
+      # Repo root: the image needs src/ and requirements.txt from there.
+      context: ../..
+      dockerfile: .recepie/arexplorer-demo/dockerfile
+    image: arexplorer-demo
+    ports:
+      - "2000:8000"
+    env_file:
+      - ../../.env
+    environment:
+      AGENT_MODEL: gemini-2.5-flash
+      NER_SRC_DIR: /app/providers
+      NER_CLASS_FILEPATH: spacy_383.py
+      NER_CLASS_NAME: SpacyNER
+      NER_MODEL: en_core_web_sm
+      RELATION_PROVIDER_FILEPATH: /app/providers/replicate_104.py
+      RELATION_MODEL: meta/meta-llama-3-70b-instruct
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s

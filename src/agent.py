@@ -350,7 +350,7 @@ skills_toolset = skill_toolset.SkillToolset(
 root_agent = Agent(
     name="arexplorer_agent",
     model=Gemini(
-        model="gemini-2.5-flash",
+        model=os.environ.get("AGENT_MODEL", "gemini-2.5-flash"),
         retry_options=types.HttpRetryOptions(attempts=10, initial_delay=1.0),
     ),
     instruction=INSTRUCTION,

@@ -421,11 +421,13 @@
             addMessage(response.message || "(no message)", "agent");
 
             const graph = response.graph || { nodes: [], edges: [] };
-            currentGraph = graph;
-            if (response.layout === "force" || response.layout === "radial") {
-                setLayout(response.layout);
-            } else {
-                render();
+            if (graph.nodes && graph.nodes.length) {
+                currentGraph = graph;
+                if (response.layout === "force" || response.layout === "radial") {
+                    setLayout(response.layout);
+                } else {
+                    render();
+                }
             }
         } catch (err) {
             thinking.collapse("Stopped");

@@ -66,6 +66,9 @@ DOCS:
 LIMITATION: 
     1. pronouns he /she is not covered. Could be covered with 2 via extra pass over results returned by tool#1.
     2. UI: we use only CHAT as an interation with Agent, while simimar queries could be made as SHORTCUTS of interaction with graph elements.
+    3. Graph is offloaded from the context window only.
+        - The graph storage and corresponding operations with grapsh assume that the whole graph (graphs) are stored in memory.
+        - This could be further on improved to prevent OOM exceptions.
 
 EVALUATION:
     NER: refer to particular model

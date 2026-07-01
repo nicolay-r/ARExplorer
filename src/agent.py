@@ -32,7 +32,7 @@ from src.tools import (
     graph_operation as _graph_operation,
     build_output_graph as _build_output_graph,
 )
-from src.tools.graph_model import Graph
+from src.core.graph import Graph
 
 # Each `output` call saves a unique ``output_<call_id>.json`` artifact holding
 # the finished AgentResponse. The server delivers the latest one from the turn.

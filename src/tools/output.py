@@ -15,7 +15,7 @@ functions); the ADK-aware wrapper that persists the result as an artifact lives
 in `src.agent`.
 """
 
-from .graph_model import Graph
+from ..core.graph import Graph
 
 
 def build_output_graph(relations: list[dict]) -> dict:

@@ -5,7 +5,7 @@ combines two attitude/relation graphs. Useful for search-and-filter over a
 massive document database expressed as graphs.
 
 Both inputs are parsed through the canonical `Graph` model (see
-`graph_model.Graph`), which tolerates either historical graph shape, and the
+`core.graph.Graph`), which tolerates either historical graph shape, and the
 result is always serialised to the canonical, schema-compatible form::
 
     {
@@ -19,7 +19,7 @@ final `AgentResponse` graph (and to the `output` tool) without key/shape
 mismatches.
 """
 
-from .graph_model import Graph
+from ..core.graph import Graph
 
 
 def graph_operation(

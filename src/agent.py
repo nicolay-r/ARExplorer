@@ -34,17 +34,6 @@ from src.tools import (
 )
 from src.core.graph import Graph
 
-# Each `output` call saves a unique ``output_<call_id>.json`` artifact holding
-# the finished AgentResponse. The server delivers the latest one from the turn.
-
-# The `*_artifact` parameters live ONLY on these wrappers (not on the underlying
-# `src.tools.*` functions) because that is what ADK 2.0 turns into the LLM-facing
-# JSON schema. The before_tool_callback `inflate_artifact_inputs` consumes them
-# and rewrites `args` so the wrapper itself never sees them. Per-param
-# descriptions live in the docstring because ADK calls `get_type_hints` without
-# `include_extras=True`, which strips any `Annotated[..., Field(...)]` metadata
-# before schema generation.
-
 
 def extract_named_entities(
     texts: list[str] | None = None,
@@ -309,11 +298,6 @@ async def output(
     return summary
 
 
-# All task-specific behavior (the tool chain, artifact offloading/inflation, and
-# how the final response is assembled) lives in ADK skills that the agent loads
-# on demand. This keeps the base instruction task-agnostic: it states only the
-# agent identity, a skill-first working style, and the always-on structured
-# output contract — the loaded skill supplies everything else.
 INSTRUCTION = """\
 You are ARExplorer — a helpful assistant for questions about attitudes and
 relations in documents, and for running the extraction pipeline when the user

@@ -101,6 +101,15 @@ Then open http://127.0.0.1:8000/.
 
 # Deployment
 
+Create `.recepie/arexplorer-demo/.env` with API keys and optional auth:
+
+```bash
+cat > .recepie/arexplorer-demo/.env <<'EOF'
+GOOGLE_API_KEY=<your-google-api-key>
+REPLICATE_API_TOKEN=<your-replicate-api-token>
+EOF
+```
+
 Using docker-compose:
 
 ```bash

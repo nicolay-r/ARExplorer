@@ -3,12 +3,18 @@
 ![Python 3.10](https://img.shields.io/badge/python-3.10-green.svg)
 [![bulk-ner](https://img.shields.io/badge/bulk--ner-0.25.2-blue.svg)](https://github.com/nicolay-r/bulk-ner)
 [![bulk-chain](https://img.shields.io/badge/bulk--chain-1.2.1-blue.svg)](https://github.com/nicolay-r/bulk-chain)
+[![demo video](https://img.shields.io/badge/demo-video-red.svg)](https://youtu.be/A4ESKHX5CKU)
 
 <p align="center">
   <img src="logo.png" alt="ARExplorer">
 </p>
 
-ARExplorer -- is an agent for extracting **Attitudes and Relations** from documents,
+<p align="center">
+  <a href="https://youtu.be/A4ESKHX5CKU"><b>Demo video</b>↗️</a>
+  <br>
+</p>
+
+**ARExplorer** -- is an agent for extracting **Attitudes and Relations** from documents,
 exposing three tools: named-entity recognition (bulk-ner), relation/attitude
 classification (bulk-chain), and graph set operations (union / intersection).
 This is the successor to **[ARElight](https://github.com/nicolay-r/ARElight)**,
@@ -106,8 +112,6 @@ Then open http://127.0.0.1:2000/ (Compose maps host port `2000` → container
 `8000`). 
 
 # Dependencies
-
-ARExplorer builds on two local projects:
 
 - **[bulk-ner](https://github.com/nicolay-r/bulk-ner)** — batch NER over large text collections Powers `extract_named_entities`.
 - **[bulk-chain](https://github.com/nicolay-r/bulk-chain)** — batched LLM prompting with Chain-of-Thought schemas. Powers `classify_relations`.

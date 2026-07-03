@@ -28,7 +28,7 @@ granular attitude/relation visualization in large documents.
 - **[bulk-chain](https://github.com/nicolay-r/bulk-chain)** — batched LLM relation/attitude classification (`classify_relations`)
 - **Chat-driven UI** — two-panel web app with [d3.js](https://d3js.org/) graph visualization (`src/static/index.html`)
 
-NER and classification backends are configured via environment variables, not baked into `src/`; this demo uses [`.recepie/arexplorer-demo/providers/`](.recepie/arexplorer-demo/providers/) (spaCy NER + Replicate LLM adapters)
+> NER and classification backends are configured via environment variables, not baked into `src/`; this demo uses [`.recepie/arexplorer-demo/providers/`](.recepie/arexplorer-demo/providers/) (spaCy NER + Replicate LLM adapters)
 
 # UI
 
@@ -38,7 +38,13 @@ with a structured `AgentResponse` (`src/schema.py`); the chat shows `message`
 and the graph drives the visualization.
 
 <p align="center">
-    <img src="docs/ui-demo.png" alt="ARExplorer UI" width="480">
+  <table>
+    <tr>
+      <td align="center"><img src="docs/demo.gif" alt="ARExplorer demo" height="320" width="406"></td>
+      <td align="center"><img src="docs/ui-image-1-financial-time.png" alt="ARExplorer UI — force layout" height="320" width="393"></td>
+      <td align="center"><img src="docs/ui-image-2-financial-time.png" alt="ARExplorer UI — radial layout" height="320" width="482"></td>
+    </tr>
+  </table>
 </p>
 
 # Usage

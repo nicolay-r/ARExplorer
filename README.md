@@ -38,9 +38,12 @@ with a structured `AgentResponse` (`src/schema.py`); the chat shows `message`
 and the graph drives the visualization.
 
 <p align="center">
+  <img src="docs/demo.gif" alt="ARExplorer demo" width="890">
+</p>
+
+<p align="center">
   <table>
     <tr>
-      <td align="center"><img src="docs/demo.gif" alt="ARExplorer demo" height="320" width="406"></td>
       <td align="center"><img src="docs/ui-image-1-financial-time.png" alt="ARExplorer UI — force layout" height="320" width="393"></td>
       <td align="center"><img src="docs/ui-image-2-financial-time.png" alt="ARExplorer UI — radial layout" height="320" width="482"></td>
     </tr>
